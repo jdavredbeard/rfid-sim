@@ -1,5 +1,11 @@
 const std = @import("std");
 
+comptime {
+    if (@import("builtin").cpu.arch.endian() != .little) {
+        @compileError("output.zig writes native-endian float32 but the spec requires little-endian; add byte-swapping for big-endian targets");
+    }
+}
+
 pub const SampleMeta = struct {
     tag_x: f64,
     tag_y: f64,
@@ -18,6 +24,7 @@ pub const GridMeta = struct {
 pub fn appendSample(file: std.fs.File, responses: []const []const f32) !u64 {
     const offset = try file.getPos();
     for (responses) |ant| {
+        // native-endian == little-endian on supported targets (guarded at comptime above)
         try file.writeAll(std.mem.sliceAsBytes(ant));
     }
     return offset;

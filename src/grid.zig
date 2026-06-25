@@ -112,6 +112,19 @@ pub fn build(allocator: std.mem.Allocator, cfg: config.Config) !Grid {
     return grid;
 }
 
+pub const PlacementError = error{AntennaInsideStructure};
+
+/// Reject antennas whose grid cell is not free space (inside a wall or obstacle).
+/// Catches walls too (config.validate only checks obstacle rectangles geometrically).
+pub fn checkAntennaPlacement(grid: Grid, cfg: config.Config) PlacementError!void {
+    for (cfg.antennas) |a| {
+        const c = grid.cellOf(a.x, a.y);
+        const k = grid.idx(c.i, c.j);
+        const free = grid.eps_r[k] == 1.0 and grid.sigma[k] == 0.0 and !grid.pec[k];
+        if (!free) return PlacementError.AntennaInsideStructure;
+    }
+}
+
 fn paintCell(grid: *Grid, i: usize, j: usize, mat: config.Material) void {
     const k = grid.idx(i, j);
     grid.eps_r[k] = mat.epsilon_r;
@@ -199,4 +212,47 @@ test "cellOf maps world coords to indices" {
     const c = g.cellOf(0.55, 0.25);
     try std.testing.expectEqual(@as(usize, 5), c.i);
     try std.testing.expectEqual(@as(usize, 2), c.j);
+}
+
+test "checkAntennaPlacement rejects antenna inside a wall" {
+    var mats = std.json.ArrayHashMap(config.Material){};
+    defer mats.deinit(std.testing.allocator);
+    try mats.map.put(std.testing.allocator, "concrete", .{ .epsilon_r = 4.5, .sigma = 0.02 });
+    // A wall along the left edge, thick enough to cover the antenna cell.
+    var walls = [_]config.Wall{.{ .x1 = 0, .y1 = 0, .x2 = 0, .y2 = 1.0, .material = "concrete", .thickness = 0.4 }};
+    var ants = [_]config.Antenna{.{ .x = 0.1, .y = 0.5, .label = "ant1" }}; // inside the 0.2m-each-side wall
+    const cfg = config.Config{
+        .room = .{ .width = 1.0, .height = 1.0 },
+        .grid_resolution = 0.05,
+        .materials = mats,
+        .walls = &walls,
+        .obstacles = &.{},
+        .antennas = &ants,
+        .source = .{ .type = "gaussian_pulse", .center_freq = 915e6, .bandwidth = 200e6 },
+        .tag_grid_spacing = 0.25,
+        .timesteps = 10,
+    };
+    var g = try build(std.testing.allocator, cfg);
+    defer g.deinit();
+    try std.testing.expectError(PlacementError.AntennaInsideStructure, checkAntennaPlacement(g, cfg));
+}
+
+test "checkAntennaPlacement accepts clear antenna" {
+    var mats = std.json.ArrayHashMap(config.Material){};
+    defer mats.deinit(std.testing.allocator);
+    var ants = [_]config.Antenna{.{ .x = 0.5, .y = 0.5, .label = "ant1" }};
+    const cfg = config.Config{
+        .room = .{ .width = 1.0, .height = 1.0 },
+        .grid_resolution = 0.05,
+        .materials = mats,
+        .walls = &.{},
+        .obstacles = &.{},
+        .antennas = &ants,
+        .source = .{ .type = "gaussian_pulse", .center_freq = 915e6, .bandwidth = 200e6 },
+        .tag_grid_spacing = 0.25,
+        .timesteps = 10,
+    };
+    var g = try build(std.testing.allocator, cfg);
+    defer g.deinit();
+    try checkAntennaPlacement(g, cfg);
 }

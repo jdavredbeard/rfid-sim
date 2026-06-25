@@ -35,18 +35,33 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
         const a = args[i];
         if (std.mem.eql(u8, a, "--config")) {
             i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --config requires a value\n", .{});
+                return;
+            }
             config_path = args[i];
         } else if (std.mem.eql(u8, a, "--output")) {
             i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --output requires a value\n", .{});
+                return;
+            }
             output_base = args[i];
         } else if (std.mem.eql(u8, a, "--validate")) {
             do_validate = true;
         } else if (std.mem.eql(u8, a, "--threads")) {
             i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --threads requires a value\n", .{});
+                return;
+            }
             threads = try std.fmt.parseInt(usize, args[i], 10);
         } else if (std.mem.eql(u8, a, "--save-snapshots") or std.mem.eql(u8, a, "--snapshot-interval")) {
             std.debug.print("warning: snapshot flags are not supported in this build (see Visualizer plan)\n", .{});
-            if (std.mem.eql(u8, a, "--snapshot-interval")) i += 1;
+            if (std.mem.eql(u8, a, "--snapshot-interval")) {
+                if (i + 1 >= args.len) return;
+                i += 1;
+            }
         } else {
             std.debug.print("unknown flag: {s}\n", .{a});
             return;
@@ -81,6 +96,11 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     var grid = try grid_mod.build(allocator, parsed.value);
     defer grid.deinit();
+
+    grid_mod.checkAntennaPlacement(grid, parsed.value) catch |e| {
+        std.debug.print("error: invalid config: {s}\n", .{@errorName(e)});
+        return;
+    };
 
     std.debug.print("simulating: {d}x{d} grid, {d} threads...\n", .{ grid.nx, grid.ny, threads });
     var timer = try std.time.Timer.start();

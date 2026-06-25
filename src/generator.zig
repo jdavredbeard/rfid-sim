@@ -102,14 +102,14 @@ const Worker = struct {
     positions: []const TagPos,
     next: *std.atomic.Value(usize),
     results: [][][]f32, // results[i] = responses for positions[i] (one []f32 per antenna)
-    err: *?anyerror,
+    err: ?anyerror = null,
 
     fn loop(self: *Worker) void {
         while (true) {
             const i = self.next.fetchAdd(1, .seq_cst);
             if (i >= self.positions.len) return;
             const responses = simulateOne(self.allocator, self.grid, self.cfg, self.positions[i]) catch |e| {
-                self.err.* = e;
+                self.err = e;
                 return;
             };
             self.results[i] = responses;
@@ -139,7 +139,6 @@ pub fn runSweep(
     for (results) |*r| r.* = empty;
 
     var next = std.atomic.Value(usize).init(0);
-    var worker_err: ?anyerror = null;
 
     const n_threads = @max(1, thread_count);
     const workers = try allocator.alloc(Worker, n_threads);
@@ -155,13 +154,16 @@ pub fn runSweep(
             .positions = positions,
             .next = &next,
             .results = results,
-            .err = &worker_err,
         };
         threads[ti] = try std.Thread.spawn(.{}, Worker.loop, .{w});
     }
     for (threads) |t| t.join();
 
-    if (worker_err) |e| {
+    var sweep_err: ?anyerror = null;
+    for (workers) |w| {
+        if (w.err) |e| { sweep_err = e; break; }
+    }
+    if (sweep_err) |e| {
         for (results) |r| if (r.len != 0) freeResponses(allocator, r);
         return e;
     }
