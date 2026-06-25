@@ -15,6 +15,31 @@ pub fn superposeInto(out: [][]f32, sim: simdata.SimData, tag_indices: []const us
     }
 }
 
+/// Add Gaussian noise to `buf` so that signal-power / noise-power == 10^(snr_db/10).
+/// Signal power is measured as mean(x^2) over all antennas/timesteps of the current buffer.
+/// No-op if the signal power is zero (avoids division by zero on an all-zero waveform).
+pub fn addNoiseInto(buf: [][]f32, snr_db: f64, rand: std.Random) void {
+    var sumsq: f64 = 0;
+    var count: usize = 0;
+    for (buf) |b| {
+        for (b) |v| {
+            sumsq += @as(f64, v) * @as(f64, v);
+            count += 1;
+        }
+    }
+    if (count == 0) return;
+    const sig_power = sumsq / @as(f64, @floatFromInt(count));
+    if (sig_power <= 0) return;
+
+    const noise_power = sig_power / std.math.pow(f64, 10.0, snr_db / 10.0);
+    const sigma = @sqrt(noise_power);
+    for (buf) |b| {
+        for (b) |*v| {
+            v.* += @floatCast(sigma * rand.floatNorm(f64));
+        }
+    }
+}
+
 // ===== TESTS (written first) =====
 
 test "superposeInto sums selected tags per antenna" {
@@ -40,4 +65,35 @@ test "superposeInto sums selected tags per antenna" {
 
     superposeInto(&out, sim, &[_]usize{1}); // single tag
     try std.testing.expectEqualSlices(f32, &[_]f32{ 10, 20, 30 }, out[0]);
+}
+
+test "addNoiseInto realizes the target SNR within tolerance" {
+    const M = 20000;
+    const sig = try std.testing.allocator.alloc(f32, M);
+    defer std.testing.allocator.free(sig);
+    @memset(sig, 1.0); // constant signal => signal power = 1.0
+    const orig = try std.testing.allocator.dupe(f32, sig);
+    defer std.testing.allocator.free(orig);
+
+    var prng = std.Random.DefaultPrng.init(12345);
+    var buf = [_][]f32{sig};
+    const snr_db: f64 = 20.0; // => noise power = 1/100 = 0.01
+    addNoiseInto(&buf, snr_db, prng.random());
+
+    var sumsq: f64 = 0;
+    for (sig, 0..) |v, i| {
+        const d = @as(f64, v) - @as(f64, orig[i]);
+        sumsq += d * d;
+    }
+    const realized = sumsq / @as(f64, @floatFromInt(M));
+    const target = 0.01;
+    try std.testing.expect(@abs(realized - target) / target < 0.10); // within 10%
+}
+
+test "addNoiseInto is a no-op on a zero signal" {
+    var z = [_]f32{ 0, 0, 0, 0 };
+    var buf = [_][]f32{&z};
+    var prng = std.Random.DefaultPrng.init(7);
+    addNoiseInto(&buf, 20.0, prng.random());
+    try std.testing.expectEqualSlices(f32, &[_]f32{ 0, 0, 0, 0 }, &z);
 }
