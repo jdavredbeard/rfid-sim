@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RFID FDTD Visualizer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>RFID FDTD Visualizer</h1>
+    <div id="status">loading…</div>
+  </header>
+  <nav id="tabs">
+    <button data-view="room" class="active">Room Layout</button>
+    <button data-view="wave">Wave Animation</button>
+    <button data-view="coverage">Coverage Heatmap</button>
+    <button data-view="impulse">Impulse Response</button>
+  </nav>
+
+  <section id="view-room" class="view active">
+    <canvas id="room-canvas" width="800" height="800"></canvas>
+    <div class="sidebar">
+      <p>Click a tag dot to select it (used by the Impulse view).</p>
+      <div id="room-selection">No tags selected.</div>
+    </div>
+  </section>
+
+  <section id="view-wave" class="view">
+    <canvas id="wave-canvas" width="800" height="800"></canvas>
+    <div class="sidebar">
+      <div id="wave-unavailable" class="hidden">No snapshots found. Re-run <code>simulate --save-snapshots</code>.</div>
+      <div id="wave-controls">
+        <button id="wave-play">▶ Play</button>
+        <label>Speed <input id="wave-speed" type="range" min="1" max="30" value="10" /></label>
+        <label>Frame <input id="wave-scrub" type="range" min="0" max="0" value="0" /></label>
+        <div id="wave-frame-label">frame 0</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-coverage" class="view">
+    <canvas id="coverage-canvas" width="800" height="800"></canvas>
+    <div class="sidebar">
+      <label>Antenna <select id="coverage-antenna"></select></label>
+      <div id="coverage-legend"></div>
+    </div>
+  </section>
+
+  <section id="view-impulse" class="view">
+    <canvas id="impulse-canvas" width="800" height="500"></canvas>
+    <div class="sidebar">
+      <div id="impulse-info">Select tag(s) in the Room Layout view, then return here.</div>
+    </div>
+  </section>
+
+  <script src="viz.js"></script>
+</body>
+</html>
