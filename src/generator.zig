@@ -11,9 +11,10 @@ pub const TagPos = struct {
     j: usize,
 };
 
-/// Compute valid tag positions: a regular grid at `tag_grid_spacing`, skipping
-/// any cell that is non-free-space (wall/obstacle) or that coincides with an
-/// antenna cell. Caller owns the returned slice.
+/// Compute valid tag positions. An explicit `cfg.tags` list takes precedence and
+/// is used verbatim; otherwise positions come from a regular grid at
+/// `tag_grid_spacing`. Either way, cells that are non-free-space (wall/obstacle)
+/// or coincide with an antenna cell are skipped. Caller owns the returned slice.
 pub fn tagPositions(
     allocator: std.mem.Allocator,
     cfg: config.Config,
@@ -30,6 +31,27 @@ pub fn tagPositions(
         try antenna_cells.put(grid.idx(c.i, c.j), {});
     }
 
+    // Explicit tag list takes precedence over the uniform grid.
+    if (cfg.tags.len > 0) {
+        for (cfg.tags) |t| {
+            const c = grid.cellOf(t.x, t.y);
+            const k = grid.idx(c.i, c.j);
+            const free = grid.eps_r[k] == 1.0 and grid.sigma[k] == 0.0 and !grid.pec[k];
+            if (!free) {
+                std.debug.print("  warning: tag ({d},{d}) is inside a wall/obstacle; skipping\n", .{ t.x, t.y });
+                continue;
+            }
+            if (antenna_cells.contains(k)) {
+                std.debug.print("  warning: tag ({d},{d}) coincides with an antenna; skipping\n", .{ t.x, t.y });
+                continue;
+            }
+            try list.append(.{ .x = t.x, .y = t.y, .i = c.i, .j = c.j });
+        }
+        return list.toOwnedSlice();
+    }
+
+    // Reached only when cfg.tags is empty; validation (NoTagSource) then guarantees
+    // tag_grid_spacing is non-null, so this unwrap cannot fail.
     const spacing = cfg.tag_grid_spacing.?;
     var y = spacing;
     while (y < cfg.room.height) : (y += spacing) {
@@ -313,6 +335,40 @@ test "runSweep writes bin and json with matching sample count" {
     defer std.testing.allocator.free(bin_path);
     const stat = try std.fs.cwd().statFile(bin_path);
     try std.testing.expectEqual(@as(u64, res.num_samples * 1 * 100 * 4), stat.size);
+}
+
+test "explicit tags are used verbatim and obstacle tags skipped" {
+    var mats = std.json.ArrayHashMap(config.Material){};
+    defer mats.deinit(std.testing.allocator);
+    try mats.map.put(std.testing.allocator, "metal", .{ .epsilon_r = 1.0, .sigma = 1e7 });
+
+    var obs = [_]config.Obstacle{.{ .type = "rect", .x = 4.0, .y = 4.0, .w = 1.0, .h = 1.0, .material = "metal" }};
+    var ants = [_]config.Antenna{.{ .x = 0.5, .y = 0.5, .label = "a" }};
+    var tags = [_]config.TagPoint{
+        .{ .x = 1.0, .y = 1.0 }, // free -> kept
+        .{ .x = 4.5, .y = 4.5 }, // inside the metal obstacle -> skipped
+    };
+    const cfg = config.Config{
+        .room = .{ .width = 6.0, .height = 6.0 },
+        .grid_resolution = 0.05,
+        .materials = mats,
+        .walls = &.{},
+        .obstacles = &obs,
+        .antennas = &ants,
+        .source = .{ .type = "gaussian_pulse", .center_freq = 915e6, .bandwidth = 200e6 },
+        .tags = &tags,
+        .timesteps = 100,
+    };
+
+    var g = try grid_mod.build(std.testing.allocator, cfg);
+    defer g.deinit();
+
+    const positions = try tagPositions(std.testing.allocator, cfg, g);
+    defer std.testing.allocator.free(positions);
+
+    try std.testing.expectEqual(@as(usize, 1), positions.len);
+    try std.testing.expectEqual(@as(f64, 1.0), positions[0].x);
+    try std.testing.expectEqual(@as(f64, 1.0), positions[0].y);
 }
 
 test "simulateOne returns one impulse per antenna with nonzero energy" {
