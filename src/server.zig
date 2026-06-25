@@ -48,30 +48,44 @@ fn assetBytes(name: []const u8) []const u8 {
 }
 
 /// Start the HTTP server. Serves embedded viz assets at / and files from `dir` under /data/.
-/// Single-threaded: one request at a time (sufficient for a local viz tool).
+/// Thread-per-connection: a browser opens several connections at once and leaves some
+/// idle on keep-alive. Handling each connection on its own thread keeps an idle or slow
+/// client from blocking the others (a single-threaded loop deadlocks the browser, which
+/// holds the page connection open while fetching data on a separate connection).
+/// Requires a thread-safe allocator (main uses GeneralPurposeAllocator, which is).
 pub fn serve(allocator: std.mem.Allocator, dir: []const u8, port: u16) !void {
     const address = try std.net.Address.parseIp("127.0.0.1", port);
     var net_server = try address.listen(.{ .reuse_address = true });
     defer net_server.deinit();
     std.debug.print("serving http://127.0.0.1:{d}/  (data dir: {s})\n", .{ port, dir });
 
-    var read_buffer: [64 * 1024]u8 = undefined;
     while (true) {
         const conn = net_server.accept() catch |e| {
             std.debug.print("accept error: {s}\n", .{@errorName(e)});
             continue;
         };
-        defer conn.stream.close();
-        var http_server = std.http.Server.init(conn, &read_buffer);
-        while (http_server.state == .ready) {
-            var request = http_server.receiveHead() catch |e| {
-                if (e != error.HttpConnectionClosing) std.debug.print("receiveHead: {s}\n", .{@errorName(e)});
-                break;
-            };
-            handle(allocator, &request, dir) catch |e| {
-                std.debug.print("handler error: {s}\n", .{@errorName(e)});
-            };
-        }
+        const thread = std.Thread.spawn(.{}, handleConn, .{ allocator, conn, dir }) catch |e| {
+            std.debug.print("spawn error: {s}\n", .{@errorName(e)});
+            conn.stream.close();
+            continue;
+        };
+        thread.detach();
+    }
+}
+
+/// Serve all requests on one connection (keep-alive), then close it.
+fn handleConn(allocator: std.mem.Allocator, conn: std.net.Server.Connection, dir: []const u8) void {
+    defer conn.stream.close();
+    var read_buffer: [64 * 1024]u8 = undefined;
+    var http_server = std.http.Server.init(conn, &read_buffer);
+    while (http_server.state == .ready) {
+        var request = http_server.receiveHead() catch |e| {
+            if (e != error.HttpConnectionClosing) std.debug.print("receiveHead: {s}\n", .{@errorName(e)});
+            break;
+        };
+        handle(allocator, &request, dir) catch |e| {
+            std.debug.print("handler error: {s}\n", .{@errorName(e)});
+        };
     }
 }
 
