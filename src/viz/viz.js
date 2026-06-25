@@ -227,10 +227,99 @@ async function renderImpulse() {
     `<br/>Tags: ${state.selected.length} (solid = first; dashed = others). Overlay shows superposition geometry.`;
 }
 
+// ---- Wave Animation view ----
+const wave = { frames: [], nx: 0, ny: 0, playing: false, idx: 0, raf: 0, maxAbs: 1 };
+
+async function loadSnapshots() {
+  if (state.snapshots) return state.snapshots;
+  const r = await fetch(`/data/${BASE}_snapshots/snapshots.json`);
+  if (!r.ok) return null;
+  const manifest = await r.json();
+  const frames = [];
+  let maxAbs = 1e-12;
+  for (const f of manifest.files) {
+    const fr = await fetch(`/data/${BASE}_snapshots/${f}`);
+    if (!fr.ok) continue;
+    const arr = new Float32Array(await fr.arrayBuffer());
+    for (let k = 0; k < arr.length; k++) { const v = Math.abs(arr[k]); if (v > maxAbs) maxAbs = v; }
+    frames.push(arr);
+  }
+  wave.frames = frames; wave.nx = manifest.nx; wave.ny = manifest.ny; wave.maxAbs = maxAbs;
+  state.snapshots = manifest;
+  return manifest;
+}
+
+function drawWaveFrame(idx) {
+  const canvas = document.getElementById("wave-canvas");
+  const ctx = canvas.getContext("2d");
+  if (!wave.frames.length) return;
+  const arr = wave.frames[idx];
+  const { nx, ny, maxAbs } = wave;
+  const img = ctx.createImageData(nx, ny);
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) {
+      const v = arr[i * ny + j] / maxAbs; // -1..1 (diverging)
+      const t = (v + 1) / 2;
+      const r = Math.max(0, Math.min(255, Math.round(255 * (t - 0.5) * 2)));
+      const b = Math.max(0, Math.min(255, Math.round(255 * (0.5 - t) * 2)));
+      const p = (j * nx + i) * 4; // image is ny rows of nx
+      img.data[p] = r; img.data[p + 1] = 0; img.data[p + 2] = b; img.data[p + 3] = 255;
+    }
+  }
+  const off = document.createElement("canvas");
+  off.width = nx; off.height = ny;
+  off.getContext("2d").putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+  document.getElementById("wave-frame-label").textContent =
+    `frame ${idx + 1}/${wave.frames.length}` + (state.snapshots ? ` (step ${state.snapshots.steps[idx]})` : "");
+  document.getElementById("wave-scrub").value = String(idx);
+}
+
+function waveTick() {
+  if (!wave.playing) return;
+  const speed = parseInt(document.getElementById("wave-speed").value, 10);
+  wave.idx = (wave.idx + 1) % wave.frames.length;
+  drawWaveFrame(wave.idx);
+  wave.raf = setTimeout(() => requestAnimationFrame(waveTick), 1000 / speed);
+}
+
+function wireWaveControls() {
+  const playBtn = document.getElementById("wave-play");
+  if (playBtn.dataset.wired) return;
+  playBtn.dataset.wired = "1";
+  playBtn.addEventListener("click", () => {
+    wave.playing = !wave.playing;
+    playBtn.textContent = wave.playing ? "⏸ Pause" : "▶ Play";
+    if (wave.playing) waveTick();
+  });
+  document.getElementById("wave-scrub").addEventListener("input", (e) => {
+    wave.idx = parseInt(e.target.value, 10);
+    drawWaveFrame(wave.idx);
+  });
+}
+
+async function renderWave() {
+  wireWaveControls();
+  const unavailable = document.getElementById("wave-unavailable");
+  const controls = document.getElementById("wave-controls");
+  const m = await loadSnapshots();
+  if (!m || wave.frames.length === 0) {
+    unavailable.classList.remove("hidden");
+    controls.classList.add("hidden");
+    return;
+  }
+  unavailable.classList.add("hidden");
+  controls.classList.remove("hidden");
+  document.getElementById("wave-scrub").max = String(wave.frames.length - 1);
+  drawWaveFrame(wave.idx);
+}
+
 // ---- view dispatch (extended in later tasks) ----
 const VIEWS = {
   room: renderRoom,
-  // wave: renderWave,  // added in Task 6
+  wave: renderWave,
   coverage: renderCoverage,
   impulse: renderImpulse,
 };
