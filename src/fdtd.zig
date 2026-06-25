@@ -54,22 +54,33 @@ pub fn init(
 ) !Sim {
     const n = grid.nx * grid.ny;
     const dt = courantDt(grid.dx);
+    const tau = 1.0 / (std.math.pi * source.bandwidth);
+
+    const ez = try allocator.alloc(f64, n);
+    errdefer allocator.free(ez);
+    const hx = try allocator.alloc(f64, n);
+    errdefer allocator.free(hx);
+    const hy = try allocator.alloc(f64, n);
+    errdefer allocator.free(hy);
+    const ca = try allocator.alloc(f64, n);
+    errdefer allocator.free(ca);
+    const cb = try allocator.alloc(f64, n);
+    errdefer allocator.free(cb);
 
     var sim = Sim{
         .allocator = allocator,
         .grid = grid,
         .dt = dt,
-        .ez = try allocator.alloc(f64, n),
-        .hx = try allocator.alloc(f64, n),
-        .hy = try allocator.alloc(f64, n),
-        .ca = try allocator.alloc(f64, n),
-        .cb = try allocator.alloc(f64, n),
+        .ez = ez,
+        .hx = hx,
+        .hy = hy,
+        .ca = ca,
+        .cb = cb,
         .f0 = source.center_freq,
-        .tau = 1.0 / (std.math.pi * source.bandwidth),
-        .t0 = 5.0 / (std.math.pi * source.bandwidth), // 5·tau
+        .tau = tau,
+        .t0 = 5.0 * tau,
         .src_index = grid.idx(src_i, src_j),
     };
-    errdefer sim.deinit();
 
     @memset(sim.ez, 0.0);
     @memset(sim.hx, 0.0);
