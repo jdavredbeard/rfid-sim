@@ -101,7 +101,11 @@ const Worker = struct {
     cfg: config.Config,
     positions: []const TagPos,
     next: *std.atomic.Value(usize),
+    done: *std.atomic.Value(usize),
     results: [][][]f32, // results[i] = responses for positions[i] (one []f32 per antenna)
+    total: usize,
+    step: usize,
+    start: std.time.Instant,
     err: ?anyerror = null,
 
     fn loop(self: *Worker) void {
@@ -113,6 +117,21 @@ const Worker = struct {
                 return;
             };
             self.results[i] = responses;
+
+            // Report progress on completion (every `step` tags, plus the last one).
+            // std.debug.print locks stderr internally, so lines won't interleave.
+            const d = self.done.fetchAdd(1, .seq_cst) + 1;
+            if (d == self.total or d % self.step == 0) {
+                const now = std.time.Instant.now() catch self.start;
+                const elapsed_s = @as(f64, @floatFromInt(now.since(self.start))) / 1e9;
+                const fd: f64 = @floatFromInt(d);
+                const ft: f64 = @floatFromInt(self.total);
+                const eta_s = if (d > 0) elapsed_s / fd * (ft - fd) else 0;
+                std.debug.print(
+                    "  progress: {d}/{d} ({d:.0}%)  elapsed {d:.0}s  eta {d:.0}s\n",
+                    .{ d, self.total, fd / ft * 100.0, elapsed_s, eta_s },
+                );
+            }
         }
     }
 };
@@ -139,6 +158,10 @@ pub fn runSweep(
     for (results) |*r| r.* = empty;
 
     var next = std.atomic.Value(usize).init(0);
+    var done = std.atomic.Value(usize).init(0);
+    const start = std.time.Instant.now() catch unreachable;
+    const step = @max(@as(usize, 1), positions.len / 100); // ~1% increments
+    std.debug.print("  {d} tag positions to simulate\n", .{positions.len});
 
     const n_threads = @max(1, thread_count);
     const workers = try allocator.alloc(Worker, n_threads);
@@ -153,7 +176,11 @@ pub fn runSweep(
             .cfg = cfg,
             .positions = positions,
             .next = &next,
+            .done = &done,
             .results = results,
+            .total = positions.len,
+            .step = step,
+            .start = start,
         };
         threads[ti] = try std.Thread.spawn(.{}, Worker.loop, .{w});
     }
