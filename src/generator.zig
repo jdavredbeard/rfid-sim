@@ -30,7 +30,7 @@ pub fn tagPositions(
         try antenna_cells.put(grid.idx(c.i, c.j), {});
     }
 
-    const spacing = cfg.tag_grid_spacing;
+    const spacing = cfg.tag_grid_spacing.?;
     var y = spacing;
     while (y < cfg.room.height) : (y += spacing) {
         var x = spacing;
