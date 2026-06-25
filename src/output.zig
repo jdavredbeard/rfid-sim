@@ -68,6 +68,37 @@ pub fn writeJson(
     try std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf.items });
 }
 
+pub const SceneEntry = struct {
+    name: []const u8,
+    label: []const u8,
+    description: []const u8,
+};
+
+/// Write the scenes.json manifest listing every dataset the visualizer can load.
+pub fn writeScenesManifest(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    entries: []const SceneEntry,
+    default_name: []const u8,
+) !void {
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+    const w = buf.writer();
+
+    try w.writeAll("{\n  \"scenes\": [\n");
+    for (entries, 0..) |e, i| {
+        try w.print(
+            "    {{ \"name\": \"{s}\", \"label\": \"{s}\", \"description\": \"{s}\" }}",
+            .{ e.name, e.label, e.description },
+        );
+        if (i + 1 != entries.len) try w.writeAll(",");
+        try w.writeAll("\n");
+    }
+    try w.print("  ],\n  \"default\": \"{s}\"\n}}\n", .{default_name});
+
+    try std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf.items });
+}
+
 pub const TagLabel = struct { x: f64, y: f64 };
 
 pub const TrainingSampleMeta = struct {
@@ -188,4 +219,21 @@ test "writeTrainingJson is parseable with correct counts and labels" {
     try std.testing.expectEqual(@as(usize, 2), arr.items.len);
     try std.testing.expectEqual(@as(usize, 2), arr.items[0].object.get("tags").?.array.items.len);
     try std.testing.expectEqualStrings("sim-output.json", obj.get("source_config").?.string);
+}
+
+test "writeScenesManifest emits expected json" {
+    const entries = [_]SceneEntry{
+        .{ .name = "open-warehouse", .label = "Open Warehouse", .description = "big open floor" },
+        .{ .name = "corridor", .label = "Corridor", .description = "" },
+    };
+    const path = "test-scenes.json";
+    try writeScenesManifest(std.testing.allocator, path, &entries, "open-warehouse");
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 1 << 16);
+    defer std.testing.allocator.free(bytes);
+
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"name\": \"open-warehouse\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"label\": \"Corridor\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"default\": \"open-warehouse\"") != null);
 }
