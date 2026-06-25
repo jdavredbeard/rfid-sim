@@ -2,7 +2,8 @@
 
 // ---- shared state ----
 const params = new URLSearchParams(location.search);
-const BASE = params.get("data") || "sim-output";
+let BASE = params.get("data") || "sim-output";
+let currentView = "room";
 const state = {
   meta: null,      // parsed sim-output.json
   bin: null,       // ArrayBuffer of sim-output.bin (lazy)
@@ -330,6 +331,7 @@ const VIEWS = {
 };
 
 function showView(name) {
+  currentView = name;
   // stop wave playback when switching views
   if (typeof wave !== "undefined" && wave.playing) {
     wave.playing = false;
@@ -350,8 +352,57 @@ function wireTabs() {
   }
 }
 
+async function loadScenes() {
+  try {
+    const r = await fetch("/data/scenes.json");
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+function populateDatasetSelect(manifest) {
+  const sel = document.getElementById("dataset-select");
+  sel.innerHTML = "";
+  for (const s of manifest.scenes) {
+    const opt = document.createElement("option");
+    opt.value = s.name;
+    opt.textContent = s.label || s.name;
+    if (s.description) opt.title = s.description;
+    sel.appendChild(opt);
+  }
+  sel.value = BASE;
+  sel.classList.remove("hidden");
+  sel.addEventListener("change", () => switchDataset(sel.value));
+}
+
+async function switchDataset(name) {
+  BASE = name;
+  const u = new URL(location);
+  u.searchParams.set("data", name);
+  history.replaceState(null, "", u);
+  state.meta = null;
+  state.bin = null;
+  state.snapshots = null;
+  state.selected = [];
+  try {
+    await loadMeta();
+    setStatus(`loaded ${BASE}.json — ${state.meta.samples.length} tags, ${state.meta.antennas.length} antennas`);
+    showView(currentView);
+  } catch (e) {
+    setStatus("error: " + e.message);
+    console.error(e);
+  }
+}
+
 async function main() {
   wireTabs();
+  const manifest = await loadScenes();
+  if (manifest && manifest.scenes && manifest.scenes.length) {
+    if (!params.get("data")) BASE = manifest.default || manifest.scenes[0].name;
+    populateDatasetSelect(manifest);
+  }
   try {
     await loadMeta();
     setStatus(`loaded ${BASE}.json — ${state.meta.samples.length} tags, ${state.meta.antennas.length} antennas`);

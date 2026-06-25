@@ -13,3 +13,9 @@ canvas { background: #0b0e13; border: 1px solid #30363d; border-radius: 6px; }
 .hidden { display: none; }
 label { display: block; margin: 0.5rem 0; }
 code { background: #21262d; padding: 0.1rem 0.3rem; border-radius: 4px; }
+#dataset-select {
+  margin-left: 1rem;
+  font-size: 1rem;
+  padding: 0.2rem 0.4rem;
+}
+#dataset-select.hidden { display: none; }
