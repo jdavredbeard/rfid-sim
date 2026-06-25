@@ -109,6 +109,7 @@ pub fn generate(
     sim: *const simdata.SimData,
     cfg: combine_config.CombineConfig,
     output_base: []const u8,
+    source_config: []const u8,
 ) !GenResult {
     const m = sim.num_antennas;
     const n = sim.impulse_length;
@@ -117,18 +118,12 @@ pub fn generate(
 
     // Reusable combined buffers (m antennas x n) + a const view for appendSample.
     const out = try allocator.alloc([]f32, m);
+    for (out) |*o| o.* = &[_]f32{};
     defer {
         for (out) |o| allocator.free(o);
         allocator.free(out);
     }
-    {
-        var built: usize = 0;
-        errdefer {
-            var z: usize = 0;
-            while (z < built) : (z += 1) allocator.free(out[z]);
-        }
-        while (built < m) : (built += 1) out[built] = try allocator.alloc(f32, n);
-    }
+    for (out) |*o| o.* = try allocator.alloc(f32, n);
     const view = try allocator.alloc([]const f32, m);
     defer allocator.free(view);
     for (out, 0..) |o, a| view[a] = o;
@@ -178,7 +173,7 @@ pub fn generate(
         try samples.append(.{ .offset = offset, .tags = tags, .snr_db = snr });
     }
 
-    try output.writeTrainingJson(allocator, json_path, "sim-output.json", @intCast(n), m, samples.items);
+    try output.writeTrainingJson(allocator, json_path, source_config, @intCast(n), m, samples.items);
     return .{ .num_samples = cfg.num_samples };
 }
 
@@ -223,7 +218,7 @@ test "generate writes training bin+json with correct counts, sizes, label ranges
         .seed = 99,
     };
 
-    const res = try generate(std.testing.allocator, &sim, cfg, base);
+    const res = try generate(std.testing.allocator, &sim, cfg, base, "sim.json");
     try std.testing.expectEqual(@as(usize, 20), res.num_samples);
 
     const bin_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.bin", .{base});
@@ -269,8 +264,8 @@ test "generate is reproducible for a fixed seed" {
     defer std.testing.allocator.free(baseA);
     const baseB = try std.fs.path.join(std.testing.allocator, &.{ dir, "b" });
     defer std.testing.allocator.free(baseB);
-    _ = try generate(std.testing.allocator, &sim, cfg, baseA);
-    _ = try generate(std.testing.allocator, &sim, cfg, baseB);
+    _ = try generate(std.testing.allocator, &sim, cfg, baseA, "sim.json");
+    _ = try generate(std.testing.allocator, &sim, cfg, baseB, "sim.json");
 
     const aBinPath = try std.fmt.allocPrint(std.testing.allocator, "{s}.bin", .{baseA});
     defer std.testing.allocator.free(aBinPath);

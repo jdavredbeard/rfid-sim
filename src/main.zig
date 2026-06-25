@@ -16,7 +16,7 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        std.debug.print("usage: rfid-sim simulate --config <path> [--output sim-output] [--threads N] [--validate]\n", .{});
+        std.debug.print("usage: rfid-sim <simulate|combine> ...\n  simulate --config <path> [--output sim-output] [--threads N] [--validate]\n  combine --input <sim-output base> --config <combine config> [--output training-data]\n", .{});
         return;
     }
 
@@ -183,9 +183,12 @@ fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    const source_config = try std.fmt.allocPrint(allocator, "{s}.json", .{inb});
+    defer allocator.free(source_config);
+
     std.debug.print("combining: {d} samples from {d} tags, {d} antennas...\n", .{ parsed.value.num_samples, sim.numSamples(), sim.num_antennas });
     var timer = try std.time.Timer.start();
-    const res = try combiner.generate(allocator, &sim, parsed.value, output_base);
+    const res = try combiner.generate(allocator, &sim, parsed.value, output_base, source_config);
     const secs = @as(f64, @floatFromInt(timer.read())) / 1e9;
     std.debug.print("done: {d} training samples in {d:.2}s -> {s}.bin / {s}.json\n", .{ res.num_samples, secs, output_base, output_base });
 }

@@ -73,6 +73,9 @@ pub fn load(allocator: std.mem.Allocator, base: []const u8) !SimData {
     const read = try bin_file.readAll(std.mem.sliceAsBytes(data));
     if (read != sz) return error.ShortBinRead;
 
+    const need = ns * meta.antennas.len * @as(usize, meta.impulse_length);
+    if (data.len < need) return error.BinTooSmall;
+
     return SimData{
         .allocator = allocator,
         .num_antennas = meta.antennas.len,
