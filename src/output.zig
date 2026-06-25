@@ -75,6 +75,8 @@ pub const SceneEntry = struct {
 };
 
 /// Write the scenes.json manifest listing every dataset the visualizer can load.
+/// Field values are emitted verbatim and are NOT JSON-escaped (matching writeJson);
+/// callers must pass scene names/labels/descriptions free of `"` and `\`.
 pub fn writeScenesManifest(
     allocator: std.mem.Allocator,
     path: []const u8,
@@ -233,7 +235,11 @@ test "writeScenesManifest emits expected json" {
     const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 1 << 16);
     defer std.testing.allocator.free(bytes);
 
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
+    defer parsed.deinit();
+
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"name\": \"open-warehouse\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"label\": \"Corridor\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"description\": \"\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"default\": \"open-warehouse\"") != null);
 }
