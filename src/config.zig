@@ -223,3 +223,21 @@ test "validate rejects config with no tag source" {
     parsed.value.tag_grid_spacing = null;
     try std.testing.expectError(ValidationError.NoTagSource, validate(parsed.value));
 }
+
+test "all scene configs parse and validate" {
+    var dir = try std.fs.cwd().openDir("configs/scenes", .{ .iterate = true });
+    defer dir.close();
+    var it = dir.iterate();
+    var count: usize = 0;
+    while (try it.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
+        const bytes = try dir.readFileAlloc(std.testing.allocator, entry.name, 1 << 20);
+        defer std.testing.allocator.free(bytes);
+        var parsed = try parse(std.testing.allocator, bytes);
+        defer parsed.deinit();
+        try validate(parsed.value);
+        count += 1;
+    }
+    try std.testing.expect(count >= 6);
+}

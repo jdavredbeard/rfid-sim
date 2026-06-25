@@ -1,0 +1,36 @@
+{
+  "label": "L-Shaped Store",
+  "description": "Rectangular room with an interior wall fencing off the top-right corner into an L; metal shelving aisles",
+  "room": { "width": 12.0, "height": 10.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "metal": { "epsilon_r": 1.0, "sigma": 1e7 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 12, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 12, "y1": 0, "x2": 12, "y2": 10, "material": "concrete", "thickness": 0.2 },
+    { "x1": 12, "y1": 10, "x2": 0, "y2": 10, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 10, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 8, "y1": 6, "x2": 8, "y2": 10, "material": "concrete", "thickness": 0.2 },
+    { "x1": 8, "y1": 6, "x2": 12, "y2": 6, "material": "concrete", "thickness": 0.2 }
+  ],
+  "obstacles": [
+    { "type": "rect", "x": 2.0, "y": 2.0, "w": 4.0, "h": 0.6, "material": "metal" },
+    { "type": "rect", "x": 2.0, "y": 5.0, "w": 4.0, "h": 0.6, "material": "metal" },
+    { "type": "rect", "x": 9.0, "y": 2.0, "w": 0.6, "h": 2.5, "material": "metal" }
+  ],
+  "antennas": [
+    { "x": 0.5, "y": 0.5, "label": "ant1" },
+    { "x": 11.5, "y": 0.5, "label": "ant2" },
+    { "x": 0.5, "y": 9.5, "label": "ant3" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "tags": [
+    { "x": 1.0, "y": 1.0 }, { "x": 3.5, "y": 3.5 }, { "x": 6.5, "y": 2.2 },
+    { "x": 1.0, "y": 4.0 }, { "x": 4.0, "y": 6.5 }, { "x": 1.0, "y": 7.5 },
+    { "x": 3.0, "y": 8.5 }, { "x": 6.5, "y": 8.0 }, { "x": 7.0, "y": 4.5 },
+    { "x": 10.5, "y": 1.0 }, { "x": 11.0, "y": 4.0 }, { "x": 6.5, "y": 5.5 }
+  ],
+  "timesteps": 5500
+}

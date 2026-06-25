@@ -1,0 +1,32 @@
+{
+  "label": "Open Warehouse",
+  "description": "Large open floor, 4 corner antennas, sparse scattered tags",
+  "room": { "width": 12.0, "height": 12.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "metal": { "epsilon_r": 1.0, "sigma": 1e7 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 12, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 12, "y1": 0, "x2": 12, "y2": 12, "material": "concrete", "thickness": 0.2 },
+    { "x1": 12, "y1": 12, "x2": 0, "y2": 12, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 12, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 }
+  ],
+  "obstacles": [
+    { "type": "rect", "x": 5.0, "y": 5.0, "w": 2.0, "h": 2.0, "material": "metal" }
+  ],
+  "antennas": [
+    { "x": 0.5, "y": 0.5, "label": "ant1" },
+    { "x": 11.5, "y": 0.5, "label": "ant2" },
+    { "x": 0.5, "y": 11.5, "label": "ant3" },
+    { "x": 11.5, "y": 11.5, "label": "ant4" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "tags": [
+    { "x": 2.0, "y": 2.0 }, { "x": 9.0, "y": 2.5 }, { "x": 3.5, "y": 8.0 },
+    { "x": 8.5, "y": 9.0 }, { "x": 6.0, "y": 3.0 }, { "x": 2.5, "y": 10.0 },
+    { "x": 10.0, "y": 6.0 }, { "x": 6.5, "y": 10.5 }
+  ],
+  "timesteps": 6000
+}
