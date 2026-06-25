@@ -1,0 +1,32 @@
+{
+  "label": "Narrow Corridor",
+  "description": "Long narrow hallway, antennas at both ends, tags in a line down the center",
+  "room": { "width": 20.0, "height": 3.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "metal": { "epsilon_r": 1.0, "sigma": 1e7 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 20, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 20, "y1": 0, "x2": 20, "y2": 3, "material": "concrete", "thickness": 0.2 },
+    { "x1": 20, "y1": 3, "x2": 0, "y2": 3, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 3, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 }
+  ],
+  "obstacles": [
+    { "type": "rect", "x": 6.0, "y": 0.3, "w": 0.5, "h": 0.5, "material": "metal" },
+    { "type": "rect", "x": 14.0, "y": 2.2, "w": 0.5, "h": 0.5, "material": "metal" }
+  ],
+  "antennas": [
+    { "x": 0.5, "y": 1.5, "label": "ant1" },
+    { "x": 19.5, "y": 1.5, "label": "ant2" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "tags": [
+    { "x": 2.0, "y": 1.5 }, { "x": 4.0, "y": 1.5 }, { "x": 6.0, "y": 1.5 },
+    { "x": 8.0, "y": 1.5 }, { "x": 10.0, "y": 1.5 }, { "x": 12.0, "y": 1.5 },
+    { "x": 14.0, "y": 1.5 }, { "x": 16.0, "y": 1.5 }, { "x": 18.0, "y": 1.5 },
+    { "x": 11.0, "y": 1.5 }
+  ],
+  "timesteps": 6000
+}

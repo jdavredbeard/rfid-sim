@@ -1,0 +1,31 @@
+{
+  "label": "Small Office",
+  "description": "Drywall partitions split the floor into three sub-rooms with doorway gaps, 3 antennas, tags per room",
+  "room": { "width": 10.0, "height": 8.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "drywall": { "epsilon_r": 2.1, "sigma": 0.001 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 10, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 10, "y1": 0, "x2": 10, "y2": 8, "material": "concrete", "thickness": 0.2 },
+    { "x1": 10, "y1": 8, "x2": 0, "y2": 8, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 8, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 4, "y1": 0, "x2": 4, "y2": 5.5, "material": "drywall", "thickness": 0.1 },
+    { "x1": 4, "y1": 5.0, "x2": 10, "y2": 5.0, "material": "drywall", "thickness": 0.1 }
+  ],
+  "obstacles": [],
+  "antennas": [
+    { "x": 0.5, "y": 0.5, "label": "ant1" },
+    { "x": 9.5, "y": 0.5, "label": "ant2" },
+    { "x": 5.0, "y": 7.5, "label": "ant3" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "tags": [
+    { "x": 1.5, "y": 2.0 }, { "x": 2.5, "y": 4.0 }, { "x": 1.5, "y": 6.5 },
+    { "x": 6.5, "y": 1.5 }, { "x": 8.5, "y": 2.5 }, { "x": 7.0, "y": 3.5 },
+    { "x": 6.0, "y": 6.5 }, { "x": 8.5, "y": 6.5 }, { "x": 7.5, "y": 7.0 }
+  ],
+  "timesteps": 5000
+}

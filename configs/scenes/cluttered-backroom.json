@@ -1,0 +1,39 @@
+{
+  "label": "Cluttered Backroom",
+  "description": "Small room packed with metal shelving rows, 4 wall-mounted antennas, tags in the aisles",
+  "room": { "width": 8.0, "height": 8.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "metal": { "epsilon_r": 1.0, "sigma": 1e7 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 8, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 8, "y1": 0, "x2": 8, "y2": 8, "material": "concrete", "thickness": 0.2 },
+    { "x1": 8, "y1": 8, "x2": 0, "y2": 8, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 8, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 }
+  ],
+  "obstacles": [
+    { "type": "rect", "x": 1.0, "y": 1.0, "w": 5.0, "h": 0.5, "material": "metal" },
+    { "type": "rect", "x": 1.0, "y": 3.0, "w": 5.0, "h": 0.5, "material": "metal" },
+    { "type": "rect", "x": 1.0, "y": 5.0, "w": 5.0, "h": 0.5, "material": "metal" },
+    { "type": "rect", "x": 1.0, "y": 7.0, "w": 5.0, "h": 0.5, "material": "metal" },
+    { "type": "rect", "x": 6.8, "y": 1.0, "w": 0.5, "h": 3.0, "material": "metal" }
+  ],
+  "antennas": [
+    { "x": 0.4, "y": 4.0, "label": "ant1" },
+    { "x": 7.6, "y": 4.0, "label": "ant2" },
+    { "x": 4.0, "y": 0.4, "label": "ant3" },
+    { "x": 4.0, "y": 7.6, "label": "ant4" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "snapshots": true,
+  "tags": [
+    { "x": 1.5, "y": 2.2 }, { "x": 3.0, "y": 2.2 }, { "x": 4.5, "y": 2.2 },
+    { "x": 1.5, "y": 4.2 }, { "x": 3.0, "y": 4.2 }, { "x": 4.5, "y": 4.2 },
+    { "x": 1.5, "y": 6.2 }, { "x": 3.0, "y": 6.2 }, { "x": 4.5, "y": 6.2 },
+    { "x": 5.8, "y": 4.2 }, { "x": 5.8, "y": 6.2 }, { "x": 7.4, "y": 6.0 },
+    { "x": 7.4, "y": 2.0 }, { "x": 2.0, "y": 0.4 }, { "x": 5.5, "y": 0.4 }
+  ],
+  "timesteps": 5000
+}
