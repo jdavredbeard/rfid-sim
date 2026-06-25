@@ -285,7 +285,7 @@ fn cmdScenes(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     if (entries.items.len == 0) {
         std.debug.print("error: no scenes succeeded; manifest not written\n", .{});
-        return;
+        std.process.exit(1);
     }
 
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/scenes.json", .{out_dir});
@@ -293,7 +293,10 @@ fn cmdScenes(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try output.writeScenesManifest(allocator, manifest_path, entries.items, entries.items[0].name);
     std.debug.print("wrote {s} ({d} scenes)\n", .{ manifest_path, entries.items.len });
 
-    if (had_error) std.debug.print("note: some scenes failed; see messages above\n", .{});
+    if (had_error) {
+        std.debug.print("note: some scenes failed; see messages above\n", .{});
+        std.process.exit(1);
+    }
 }
 
 fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
