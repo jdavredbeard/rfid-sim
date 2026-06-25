@@ -25,6 +25,7 @@ pub fn resolveRoute(target: []const u8) Route {
         const rel = path["/data/".len..];
         if (rel.len == 0) return .not_found;
         if (std.mem.indexOf(u8, rel, "..") != null) return .not_found;
+        // Rejects "..", absolute subpaths; symlinks under `dir` are still followed (localhost dev tool).
         if (rel[0] == '/') return .not_found;
         return .{ .data = rel };
     }

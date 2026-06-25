@@ -21,6 +21,8 @@ pub fn capture(
 ) !void {
     try std.fs.cwd().makePath(out_dir);
 
+    // Dedicated single-tag run: the sweep only records probe samples, not the full
+    // field, so snapshots require re-running the FDTD for this one position.
     var sim = try fdtd.init(allocator, grid, source, src_i, src_j);
     defer sim.deinit();
 
@@ -48,8 +50,8 @@ pub fn capture(
             const fpath = try std.fs.path.join(allocator, &.{ out_dir, fname });
             defer allocator.free(fpath);
             try std.fs.cwd().writeFile(.{ .sub_path = fpath, .data = std.mem.sliceAsBytes(f32buf) });
-            try files.append(fname); // ownership moves to `files`
             try steps.append(n + 1);
+            try files.append(fname); // ownership moves to `files`; keep this LAST fallible op
             snap_index += 1;
         }
     }
