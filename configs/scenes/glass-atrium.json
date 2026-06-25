@@ -5,7 +5,6 @@
   "grid_resolution": 0.015,
   "materials": {
     "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
-    "metal": { "epsilon_r": 1.0, "sigma": 1e7 },
     "glass": { "epsilon_r": 6.0, "sigma": 0.004 }
   },
   "walls": [
