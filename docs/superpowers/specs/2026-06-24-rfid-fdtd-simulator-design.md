@@ -47,7 +47,7 @@ Ez_src(t) = exp(-((t - t0) / τ)²) × sin(2π × f0 × t)
 
 Where:
 - `f0` = center frequency (915 MHz)
-- `τ` = 1 / (π × bandwidth)` — pulse width derived from configured bandwidth
+- `τ = 1 / (π × bandwidth)` — pulse width derived from configured bandwidth
 - `t0` = 5τ — delay so the pulse starts from near-zero (avoids startup discontinuity)
 
 **Note on physical model:** In real RFID, antennas transmit and tags backscatter. By reciprocity, modeling tags as sources and antennas as receivers yields identical impulse responses. This simulation assumes that tags don't significantly scatter each other's signals — i.e., tag A's response is the same whether tag B is present or not. This is valid for passive UHF RFID tags, which are tiny weak scatterers compared to walls and shelves. This assumption is what allows the combiner to generate multi-tag data by simply summing single-tag impulse responses (superposition) rather than re-running the FDTD for every tag combination.
@@ -125,6 +125,8 @@ Browser-based tool served from a local HTTP server. Four views:
 }
 ```
 
+**Wall geometry:** The line `(x1,y1)-(x2,y2)` is the wall centerline. Thickness extends equally on both sides (thickness/2 per side). Walls thinner than one grid cell after discretization are clamped to 1 cell. Antennas placed inside walls/obstacles are rejected at config validation time.
+
 ### Material Properties Reference
 
 | Material | ε_r | σ (S/m) | Behavior |
@@ -165,6 +167,7 @@ All binary files use **little-endian** byte order (IEEE 754 float32).
 **`training-data.json`** — labels and metadata:
 ```json
 {
+  "version": 1,
   "source_config": "sim-output.json",
   "num_samples": 50000,
   "impulse_length": 8000,
@@ -236,7 +239,7 @@ For a 10m × 15m room at 1.5cm resolution (667 × 1000 grid), 8000 timesteps:
 - ~16G float ops per tag position (2M × 8000 timesteps)
 - Zig (single core): ~2-4s per tag position (memory-bound stencil computation)
 - Zig (8 cores): ~0.3-0.5s per tag position
-- Tag positions at 25cm spacing: ~2,400 positions (skipping obstacles)
+- Tag positions at 25cm spacing: up to 2,400 positions (fewer after skipping walls/obstacles)
 - Full sweep (8 cores): ~12-20 minutes
 
 Superposition combiner is I/O-bound — generating 50K multi-tag samples takes seconds.
@@ -245,7 +248,7 @@ Superposition combiner is I/O-bound — generating 50K multi-tag samples takes s
 
 The `simulate` command supports a `--validate` flag that runs a free-space accuracy test:
 
-1. Creates a large empty room (e.g. 50m × 50m) with source at center and probes at known distances (1m, 2m, 5m, 10m)
+1. Creates a large empty room (e.g. 50m × 50m) with source at center and probes at known distances (1m, 2m, 5m, 10m). Uses coarser resolution (e.g. 3cm) to keep runtime reasonable (~11s single-threaded vs. minutes at full resolution).
 2. Runs the FDTD for only enough timesteps for the direct pulse to reach all probes, but stops before wall reflections return to any probe (travel time to nearest wall and back > simulation duration)
 3. Compares measured peak amplitude at each probe to the analytical 2D free-space decay (`1/√r`)
 4. Reports percentage error at each probe distance
