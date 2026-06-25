@@ -214,7 +214,7 @@ async function renderImpulse() {
       ctx.beginPath();
       const imp = impulseFor(s, a);
       for (let k = 0; k < N; k++) {
-        const x = pad + (k / (N - 1)) * w;
+        const x = pad + (N > 1 ? k / (N - 1) : 0) * w;
         const y = midY - (imp[k] / amp) * (h / 2) * 0.95;
         if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
@@ -295,6 +295,11 @@ function wireWaveControls() {
     if (wave.playing) waveTick();
   });
   document.getElementById("wave-scrub").addEventListener("input", (e) => {
+    if (wave.playing) {
+      wave.playing = false;
+      clearTimeout(wave.raf);
+      document.getElementById("wave-play").textContent = "▶ Play";
+    }
     wave.idx = parseInt(e.target.value, 10);
     drawWaveFrame(wave.idx);
   });
@@ -325,6 +330,13 @@ const VIEWS = {
 };
 
 function showView(name) {
+  // stop wave playback when switching views
+  if (typeof wave !== "undefined" && wave.playing) {
+    wave.playing = false;
+    clearTimeout(wave.raf);
+    const pb = document.getElementById("wave-play");
+    if (pb) pb.textContent = "▶ Play";
+  }
   for (const sec of document.querySelectorAll(".view")) sec.classList.remove("active");
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active", b.dataset.view === name);
   document.getElementById(`view-${name}`).classList.add("active");
