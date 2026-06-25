@@ -1,0 +1,7 @@
+{
+  "source": "sim-output",
+  "num_samples": 50000,
+  "tags_per_sample": { "min": 1, "max": 5 },
+  "noise_snr_db": { "min": 10, "max": 40 },
+  "seed": 42
+}

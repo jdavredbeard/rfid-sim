@@ -68,6 +68,49 @@ pub fn writeJson(
     try std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf.items });
 }
 
+pub const TagLabel = struct { x: f64, y: f64 };
+
+pub const TrainingSampleMeta = struct {
+    offset: u64,
+    tags: []const TagLabel,
+    snr_db: f64,
+};
+
+/// Write the training-data.json labels/metadata file.
+pub fn writeTrainingJson(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    source_config: []const u8,
+    impulse_length: u32,
+    num_antennas: usize,
+    samples: []const TrainingSampleMeta,
+) !void {
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+    const w = buf.writer();
+
+    try w.writeAll("{\n");
+    try w.print("  \"version\": 1,\n", .{});
+    try w.print("  \"source_config\": \"{s}\",\n", .{source_config});
+    try w.print("  \"num_samples\": {d},\n", .{samples.len});
+    try w.print("  \"impulse_length\": {d},\n", .{impulse_length});
+    try w.print("  \"num_antennas\": {d},\n", .{num_antennas});
+    try w.writeAll("  \"samples\": [\n");
+    for (samples, 0..) |s, i| {
+        try w.print("    {{ \"offset\": {d}, \"snr_db\": {d}, \"tags\": [", .{ s.offset, s.snr_db });
+        for (s.tags, 0..) |t, ti| {
+            if (ti != 0) try w.writeAll(", ");
+            try w.print("{{ \"x\": {d}, \"y\": {d} }}", .{ t.x, t.y });
+        }
+        try w.writeAll("] }");
+        if (i + 1 != samples.len) try w.writeAll(",");
+        try w.writeAll("\n");
+    }
+    try w.writeAll("  ]\n}\n");
+
+    try std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf.items });
+}
+
 // ===== TESTS (written first) =====
 
 test "appendSample writes contiguous float32 and reports offsets" {
@@ -116,4 +159,33 @@ test "writeJson produces parseable output with correct sample count" {
     const arr = parsed.value.object.get("samples").?.array;
     try std.testing.expectEqual(@as(usize, 2), arr.items.len);
     try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("version").?.integer);
+}
+
+test "writeTrainingJson is parseable with correct counts and labels" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(dir);
+    const full = try std.fs.path.join(std.testing.allocator, &.{ dir, "train.json" });
+    defer std.testing.allocator.free(full);
+
+    const tags0 = [_]TagLabel{ .{ .x = 1.25, .y = 2.5 }, .{ .x = 5.0, .y = 8.0 } };
+    const tags1 = [_]TagLabel{.{ .x = 3.0, .y = 3.0 }};
+    const samples = [_]TrainingSampleMeta{
+        .{ .offset = 0, .tags = &tags0, .snr_db = 25.3 },
+        .{ .offset = 64, .tags = &tags1, .snr_db = 12.0 },
+    };
+    try writeTrainingJson(std.testing.allocator, full, "sim-output.json", 8, 4, &samples);
+
+    const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, full, 1 << 20);
+    defer std.testing.allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
+    defer parsed.deinit();
+    const obj = parsed.value.object;
+    try std.testing.expectEqual(@as(i64, 4), obj.get("num_antennas").?.integer);
+    try std.testing.expectEqual(@as(i64, 8), obj.get("impulse_length").?.integer);
+    const arr = obj.get("samples").?.array;
+    try std.testing.expectEqual(@as(usize, 2), arr.items.len);
+    try std.testing.expectEqual(@as(usize, 2), arr.items[0].object.get("tags").?.array.items.len);
+    try std.testing.expectEqualStrings("sim-output.json", obj.get("source_config").?.string);
 }
