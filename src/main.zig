@@ -6,6 +6,7 @@ const validate = @import("validate.zig");
 const combine_config = @import("combine_config.zig");
 const simdata = @import("simdata.zig");
 const combiner = @import("combiner.zig");
+const snapshots = @import("snapshots.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -34,6 +35,8 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var output_base: []const u8 = "sim-output";
     var do_validate = false;
     var threads: usize = std.Thread.getCpuCount() catch 1;
+    var save_snapshots = false;
+    var snapshot_interval: u32 = 50;
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -61,12 +64,15 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
                 return;
             }
             threads = try std.fmt.parseInt(usize, args[i], 10);
-        } else if (std.mem.eql(u8, a, "--save-snapshots") or std.mem.eql(u8, a, "--snapshot-interval")) {
-            std.debug.print("warning: snapshot flags are not supported in this build (see Visualizer plan)\n", .{});
-            if (std.mem.eql(u8, a, "--snapshot-interval")) {
-                if (i + 1 >= args.len) return;
-                i += 1;
+        } else if (std.mem.eql(u8, a, "--save-snapshots")) {
+            save_snapshots = true;
+        } else if (std.mem.eql(u8, a, "--snapshot-interval")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --snapshot-interval requires a value\n", .{});
+                return;
             }
+            snapshot_interval = try std.fmt.parseInt(u32, args[i], 10);
         } else {
             std.debug.print("unknown flag: {s}\n", .{a});
             return;
@@ -112,6 +118,24 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const res = try generator.runSweep(allocator, parsed.value, &grid, config_json, output_base, threads);
     const secs = @as(f64, @floatFromInt(timer.read())) / 1e9;
     std.debug.print("done: {d} tag positions in {d:.1}s -> {s}.bin / {s}.json\n", .{ res.num_samples, secs, output_base, output_base });
+
+    if (save_snapshots) {
+        const positions = try generator.tagPositions(allocator, parsed.value, grid);
+        defer allocator.free(positions);
+        if (positions.len == 0) {
+            std.debug.print("warning: no tag positions to snapshot\n", .{});
+        } else {
+            const p = positions[0];
+            const snap_dir = try std.fmt.allocPrint(allocator, "{s}_snapshots", .{output_base});
+            defer allocator.free(snap_dir);
+            std.debug.print("capturing snapshots for tag ({d},{d}) every {d} steps...\n", .{ p.x, p.y, snapshot_interval });
+            try snapshots.capture(allocator, &grid, .{
+                .center_freq = parsed.value.source.center_freq,
+                .bandwidth = parsed.value.source.bandwidth,
+            }, p.i, p.j, p.x, p.y, parsed.value.timesteps, snapshot_interval, snap_dir);
+            std.debug.print("snapshots written to {s}/\n", .{snap_dir});
+        }
+    }
 }
 
 fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
