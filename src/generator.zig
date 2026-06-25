@@ -95,6 +95,114 @@ pub fn freeResponses(allocator: std.mem.Allocator, responses: [][]f32) void {
     allocator.free(responses);
 }
 
+const Worker = struct {
+    allocator: std.mem.Allocator,
+    grid: *const grid_mod.Grid,
+    cfg: config.Config,
+    positions: []const TagPos,
+    next: *std.atomic.Value(usize),
+    results: [][][]f32, // results[i] = responses for positions[i] (one []f32 per antenna)
+    err: *?anyerror,
+
+    fn loop(self: *Worker) void {
+        while (true) {
+            const i = self.next.fetchAdd(1, .seq_cst);
+            if (i >= self.positions.len) return;
+            const responses = simulateOne(self.allocator, self.grid, self.cfg, self.positions[i]) catch |e| {
+                self.err.* = e;
+                return;
+            };
+            self.results[i] = responses;
+        }
+    }
+};
+
+pub const RunResult = struct {
+    num_samples: usize,
+};
+
+/// Run the full sweep and write `<output_base>.bin` + `<output_base>.json`.
+pub fn runSweep(
+    allocator: std.mem.Allocator,
+    cfg: config.Config,
+    grid: *const grid_mod.Grid,
+    config_json: []const u8,
+    output_base: []const u8,
+    thread_count: usize,
+) !RunResult {
+    const positions = try tagPositions(allocator, cfg, grid.*);
+    defer allocator.free(positions);
+
+    const results = try allocator.alloc([][]f32, positions.len);
+    defer allocator.free(results);
+    const empty: [][]f32 = &.{};
+    for (results) |*r| r.* = empty;
+
+    var next = std.atomic.Value(usize).init(0);
+    var worker_err: ?anyerror = null;
+
+    const n_threads = @max(1, thread_count);
+    const workers = try allocator.alloc(Worker, n_threads);
+    defer allocator.free(workers);
+    var threads = try allocator.alloc(std.Thread, n_threads);
+    defer allocator.free(threads);
+
+    for (workers, 0..) |*w, ti| {
+        w.* = .{
+            .allocator = allocator,
+            .grid = grid,
+            .cfg = cfg,
+            .positions = positions,
+            .next = &next,
+            .results = results,
+            .err = &worker_err,
+        };
+        threads[ti] = try std.Thread.spawn(.{}, Worker.loop, .{w});
+    }
+    for (threads) |t| t.join();
+
+    if (worker_err) |e| {
+        for (results) |r| if (r.len != 0) freeResponses(allocator, r);
+        return e;
+    }
+
+    // Write bin + collect sample metadata in position order.
+    const bin_path = try std.fmt.allocPrint(allocator, "{s}.bin", .{output_base});
+    defer allocator.free(bin_path);
+    const json_path = try std.fmt.allocPrint(allocator, "{s}.json", .{output_base});
+    defer allocator.free(json_path);
+
+    const bin = try std.fs.cwd().createFile(bin_path, .{});
+    defer bin.close();
+
+    var samples = try allocator.alloc(output.SampleMeta, positions.len);
+    defer allocator.free(samples);
+
+    for (positions, 0..) |p, i| {
+        const responses = results[i]; // [][]f32
+        // appendSample wants []const []const f32; build a const view.
+        var view = try allocator.alloc([]const f32, responses.len);
+        defer allocator.free(view);
+        for (responses, 0..) |r, a| view[a] = r;
+        const offset = try output.appendSample(bin, view);
+        samples[i] = .{ .tag_x = p.x, .tag_y = p.y, .offset = offset };
+        freeResponses(allocator, responses);
+    }
+
+    var labels = try allocator.alloc([]const u8, cfg.antennas.len);
+    defer allocator.free(labels);
+    for (cfg.antennas, 0..) |a, ai| labels[ai] = a.label;
+
+    try output.writeJson(allocator, json_path, config_json, .{
+        .nx = grid.nx,
+        .ny = grid.ny,
+        .dx = grid.dx,
+        .dt = fdtd.courantDt(grid.dx),
+    }, labels, cfg.timesteps, samples);
+
+    return .{ .num_samples = positions.len };
+}
+
 // ===== TESTS =====
 
 test "tag positions skip obstacles and antennas" {
@@ -131,6 +239,51 @@ test "tag positions skip obstacles and antennas" {
         const k = g.idx(p.i, p.j);
         try std.testing.expect(!g.pec[k]);
     }
+}
+
+test "runSweep writes bin and json with matching sample count" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_path = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(dir_path);
+    const base = try std.fs.path.join(std.testing.allocator, &.{ dir_path, "sweep" });
+    defer std.testing.allocator.free(base);
+
+    var mats = std.json.ArrayHashMap(config.Material){};
+    defer mats.deinit(std.testing.allocator);
+    var ants = [_]config.Antenna{.{ .x = 0.2, .y = 0.2, .label = "ant1" }};
+    const cfg = config.Config{
+        .room = .{ .width = 1.0, .height = 1.0 },
+        .grid_resolution = 0.05,
+        .materials = mats,
+        .walls = &.{},
+        .obstacles = &.{},
+        .antennas = &ants,
+        .source = .{ .type = "gaussian_pulse", .center_freq = 915e6, .bandwidth = 200e6 },
+        .tag_grid_spacing = 0.3,
+        .timesteps = 100,
+    };
+    var g = try grid_mod.build(std.testing.allocator, cfg);
+    defer g.deinit();
+
+    const res = try runSweep(std.testing.allocator, cfg, &g, "{}", base, 2);
+    try std.testing.expect(res.num_samples > 0);
+
+    // JSON sample count matches.
+    const json_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.json", .{base});
+    defer std.testing.allocator.free(json_path);
+    const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, json_path, 1 << 20);
+    defer std.testing.allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
+    defer parsed.deinit();
+    const arr = parsed.value.object.get("samples").?.array;
+    try std.testing.expectEqual(res.num_samples, arr.items.len);
+
+    // Bin size = num_samples × num_antennas × timesteps × 4 bytes.
+    const bin_path = try std.fmt.allocPrint(std.testing.allocator, "{s}.bin", .{base});
+    defer std.testing.allocator.free(bin_path);
+    const stat = try std.fs.cwd().statFile(bin_path);
+    try std.testing.expectEqual(@as(u64, res.num_samples * 1 * 100 * 4), stat.size);
 }
 
 test "simulateOne returns one impulse per antenna with nonzero energy" {
