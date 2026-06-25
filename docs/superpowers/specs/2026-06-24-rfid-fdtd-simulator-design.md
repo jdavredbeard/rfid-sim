@@ -39,13 +39,26 @@ Where:
 - `Ca = (1 - σdt/2ε) / (1 + σdt/2ε)` — damping from conductivity
 - `Cb = (dt/ε) / (1 + σdt/2ε)` — curl coupling coefficient
 
-**Source:** Gaussian-modulated pulse centered at 915 MHz. Broadband, captures full impulse response in a single run.
+**Source:** Gaussian-modulated sinusoidal pulse, injected as a **soft source** (additive to Ez, not overwrite) to avoid artificial reflections from the source point:
 
-**Boundaries:** Conductor walls on room perimeter (physically correct for enclosed rooms — waves reflect).
+```
+Ez_src(t) = exp(-((t - t0) / τ)²) × sin(2π × f0 × t)
+```
 
-**Probes:** Record Ez at each antenna grid cell every timestep.
+Where:
+- `f0` = center frequency (915 MHz)
+- `τ` = 1 / (π × bandwidth)` — pulse width derived from configured bandwidth
+- `t0` = 5τ — delay so the pulse starts from near-zero (avoids startup discontinuity)
 
-**Snapshots (optional):** Save full Ez field at configurable intervals for visualization.
+**Note on physical model:** In real RFID, antennas transmit and tags backscatter. By reciprocity, modeling tags as sources and antennas as receivers yields identical impulse responses. This simulation assumes that tags don't significantly scatter each other's signals — i.e., tag A's response is the same whether tag B is present or not. This is valid for passive UHF RFID tags, which are tiny weak scatterers compared to walls and shelves. This assumption is what allows the combiner to generate multi-tag data by simply summing single-tag impulse responses (superposition) rather than re-running the FDTD for every tag combination.
+
+**Boundaries:** Conductor walls on room perimeter (Ez = 0). This models a fully enclosed room where waves reflect off all boundaries. Rooms with openings (doors, windows) are not currently supported — this is a stated constraint.
+
+**Metal cells:** Handled as PEC (perfect electric conductor) — directly set Ez = 0 at metal cells each timestep, rather than using extreme-sigma lossy update equations that could cause floating-point issues.
+
+**Probes:** Record Ez at each antenna grid cell every timestep. Tag positions that coincide with antenna grid cells are skipped during the sweep to avoid meaningless self-driven readings.
+
+**Snapshots (optional):** Save full Ez field at a configurable interval (`--snapshot-interval N`, default every 50 timesteps) for visualization. At 667×1000 grid × 4 bytes × 160 snapshots ≈ 430 MB.
 
 ### 2. Data Generator (Zig)
 
@@ -53,7 +66,7 @@ Orchestrator that sweeps tag positions and manages parallel simulation runs.
 
 - Reads room config JSON
 - Computes tag positions on a regular grid, skipping positions inside walls/obstacles
-- Distributes simulations across CPU threads (Zig's `std.Thread` pool)
+- Distributes simulations across CPU threads (custom thread pool using `std.Thread.spawn`)
 - Writes output files incrementally
 
 ### 3. Superposition Combiner (Zig)
@@ -126,9 +139,12 @@ Browser-based tool served from a local HTTP server. Four views:
 
 ### Simulation Output
 
+All binary files use **little-endian** byte order (IEEE 754 float32).
+
 **`sim-output.json`** — metadata and sample index:
 ```json
 {
+  "version": 1,
   "config": { "...room config..." },
   "grid": { "nx": 667, "ny": 1000, "dx": 0.015, "dt": 3.54e-11 },
   "antennas": ["ant1", "ant2", "ant3", "ant4"],
@@ -173,21 +189,23 @@ Browser-based tool served from a local HTTP server. Four views:
   "num_samples": 50000,
   "tags_per_sample": { "min": 1, "max": 5 },
   "noise_snr_db": { "min": 10, "max": 40 },
-  "output": "training-data"
+  "seed": 42
 }
 ```
+
+- `seed` — PRNG seed for reproducible training data generation
 
 ## CLI Interface
 
 ```
-rfid-sim simulate --config configs/retail.json --output sim-output [--save-snapshots] [--threads 8]
+rfid-sim simulate --config configs/retail.json --output sim-output [--save-snapshots] [--snapshot-interval 50] [--threads 8]
 rfid-sim combine --input sim-output --config combine-config.json --output training-data
 rfid-sim serve --dir sim-output --port 8080
 ```
 
 - `simulate` — Run FDTD for all tag positions, write sim-output files
 - `combine` — Generate multi-tag training data via superposition
-- `serve` — Start local HTTP server for the browser visualizer
+- `serve` — Start local HTTP server that serves both the `viz/` static assets (HTML/JS/CSS) and the simulation data directory, so the browser app can fetch output files via `fetch()`
 
 ## File Structure
 
@@ -200,6 +218,8 @@ rfid-sim/
     config.zig         -- JSON config parsing and validation
     output.zig         -- JSON + binary file I/O
     combiner.zig       -- Superposition, noise injection, training data generation
+    generator.zig      -- Tag position sweep, thread pool, orchestration
+    server.zig         -- HTTP server for viz + data serving
   configs/
     retail-example.json
   viz/
@@ -212,14 +232,25 @@ rfid-sim/
 
 For a 10m × 15m room at 1.5cm resolution (667 × 1000 grid), 8000 timesteps:
 
-- ~5.3M cells × 3 fields = ~16M float updates per timestep
-- ~128G float ops per tag position
-- Zig (single core): ~0.2-0.5s per tag position
-- Zig (8 cores): ~0.03-0.06s per tag position
+- 667K cells × 3 fields = ~2M float updates per timestep
+- ~16G float ops per tag position (2M × 8000 timesteps)
+- Zig (single core): ~2-4s per tag position (memory-bound stencil computation)
+- Zig (8 cores): ~0.3-0.5s per tag position
 - Tag positions at 25cm spacing: ~2,400 positions (skipping obstacles)
-- Full sweep (8 cores): ~1-2.5 minutes
+- Full sweep (8 cores): ~12-20 minutes
 
 Superposition combiner is I/O-bound — generating 50K multi-tag samples takes seconds.
+
+## Validation
+
+The `simulate` command supports a `--validate` flag that runs a free-space accuracy test:
+
+1. Creates a large empty room (e.g. 50m × 50m) with source at center and probes at known distances (1m, 2m, 5m, 10m)
+2. Runs the FDTD for only enough timesteps for the direct pulse to reach all probes, but stops before wall reflections return to any probe (travel time to nearest wall and back > simulation duration)
+3. Compares measured peak amplitude at each probe to the analytical 2D free-space decay (`1/√r`)
+4. Reports percentage error at each probe distance
+
+No external validation data needed — the analytical solution is the reference. This confirms the FDTD engine is correctly implemented before running real room simulations.
 
 ## Non-Goals
 
@@ -227,3 +258,4 @@ Superposition combiner is I/O-bound — generating 50K multi-tag samples takes s
 - Exact antenna radiation patterns (point probes are sufficient for training data)
 - Real-time simulation (batch generation is fine)
 - ML model training (separate concern; this tool produces the data)
+- Rooms with openings (doors, windows) — all rooms are fully enclosed
