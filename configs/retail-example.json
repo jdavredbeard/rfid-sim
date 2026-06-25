@@ -1,0 +1,28 @@
+{
+  "room": { "width": 10.0, "height": 15.0 },
+  "grid_resolution": 0.015,
+  "materials": {
+    "concrete": { "epsilon_r": 4.5, "sigma": 0.02 },
+    "metal": { "epsilon_r": 1.0, "sigma": 1e7 },
+    "drywall": { "epsilon_r": 2.1, "sigma": 0.001 },
+    "glass": { "epsilon_r": 6.0, "sigma": 0.004 }
+  },
+  "walls": [
+    { "x1": 0, "y1": 0, "x2": 10, "y2": 0, "material": "concrete", "thickness": 0.2 },
+    { "x1": 10, "y1": 0, "x2": 10, "y2": 15, "material": "concrete", "thickness": 0.2 },
+    { "x1": 10, "y1": 15, "x2": 0, "y2": 15, "material": "concrete", "thickness": 0.2 },
+    { "x1": 0, "y1": 15, "x2": 0, "y2": 0, "material": "concrete", "thickness": 0.2 }
+  ],
+  "obstacles": [
+    { "type": "rect", "x": 3.0, "y": 5.0, "w": 2.0, "h": 0.8, "material": "metal" }
+  ],
+  "antennas": [
+    { "x": 0.5, "y": 0.5, "label": "ant1" },
+    { "x": 9.5, "y": 0.5, "label": "ant2" },
+    { "x": 0.5, "y": 14.5, "label": "ant3" },
+    { "x": 9.5, "y": 14.5, "label": "ant4" }
+  ],
+  "source": { "type": "gaussian_pulse", "center_freq": 915e6, "bandwidth": 200e6 },
+  "tag_grid_spacing": 0.25,
+  "timesteps": 8000
+}
