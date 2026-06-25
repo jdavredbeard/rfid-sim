@@ -7,6 +7,7 @@ const combine_config = @import("combine_config.zig");
 const simdata = @import("simdata.zig");
 const combiner = @import("combiner.zig");
 const snapshots = @import("snapshots.zig");
+const server = @import("server.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,6 +26,8 @@ pub fn main() !void {
         try cmdSimulate(allocator, args[2..]);
     } else if (std.mem.eql(u8, args[1], "combine")) {
         try cmdCombine(allocator, args[2..]);
+    } else if (std.mem.eql(u8, args[1], "serve")) {
+        try cmdServe(allocator, args[2..]);
     } else {
         std.debug.print("unknown command: {s}\n", .{args[1]});
     }
@@ -215,6 +218,28 @@ fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const res = try combiner.generate(allocator, &sim, parsed.value, output_base, source_config);
     const secs = @as(f64, @floatFromInt(timer.read())) / 1e9;
     std.debug.print("done: {d} training samples in {d:.2}s -> {s}.bin / {s}.json\n", .{ res.num_samples, secs, output_base, output_base });
+}
+
+fn cmdServe(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var dir: []const u8 = ".";
+    var port: u16 = 8080;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--dir")) {
+            i += 1;
+            if (i >= args.len) { std.debug.print("error: --dir requires a value\n", .{}); return; }
+            dir = args[i];
+        } else if (std.mem.eql(u8, a, "--port")) {
+            i += 1;
+            if (i >= args.len) { std.debug.print("error: --port requires a value\n", .{}); return; }
+            port = try std.fmt.parseInt(u16, args[i], 10);
+        } else {
+            std.debug.print("unknown flag: {s}\n", .{a});
+            return;
+        }
+    }
+    try server.serve(allocator, dir, port);
 }
 
 test {
