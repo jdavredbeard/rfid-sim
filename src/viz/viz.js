@@ -373,8 +373,18 @@ function populateDatasetSelect(manifest) {
     sel.appendChild(opt);
   }
   sel.value = BASE;
+  if (sel.value !== BASE) {
+    const opt = document.createElement("option");
+    opt.value = BASE;
+    opt.textContent = BASE + " (custom)";
+    sel.insertBefore(opt, sel.firstChild);
+    sel.value = BASE;
+  }
   sel.classList.remove("hidden");
-  sel.addEventListener("change", () => switchDataset(sel.value));
+  if (!sel.dataset.wired) {
+    sel.addEventListener("change", () => switchDataset(sel.value));
+    sel.dataset.wired = "1";
+  }
 }
 
 async function switchDataset(name) {
@@ -386,6 +396,16 @@ async function switchDataset(name) {
   state.bin = null;
   state.snapshots = null;
   state.selected = [];
+  // Stop any wave playback and drop the previous scene's frames so they can't
+  // render under the new scene or index out of bounds.
+  wave.playing = false;
+  clearTimeout(wave.raf);
+  wave.frames = [];
+  wave.idx = 0;
+  const playBtn = document.getElementById("wave-play");
+  if (playBtn) playBtn.textContent = "▶ Play";
+  const covSel = document.getElementById("coverage-antenna");
+  if (covSel) covSel.innerHTML = "";
   try {
     await loadMeta();
     setStatus(`loaded ${BASE}.json — ${state.meta.samples.length} tags, ${state.meta.antennas.length} antennas`);
