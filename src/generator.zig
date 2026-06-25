@@ -337,7 +337,7 @@ test "runSweep writes bin and json with matching sample count" {
     try std.testing.expectEqual(@as(u64, res.num_samples * 1 * 100 * 4), stat.size);
 }
 
-test "explicit tags are used verbatim and obstacle tags skipped" {
+test "explicit tags are used verbatim and obstacle and antenna tags skipped" {
     var mats = std.json.ArrayHashMap(config.Material){};
     defer mats.deinit(std.testing.allocator);
     try mats.map.put(std.testing.allocator, "metal", .{ .epsilon_r = 1.0, .sigma = 1e7 });
@@ -347,6 +347,7 @@ test "explicit tags are used verbatim and obstacle tags skipped" {
     var tags = [_]config.TagPoint{
         .{ .x = 1.0, .y = 1.0 }, // free -> kept
         .{ .x = 4.5, .y = 4.5 }, // inside the metal obstacle -> skipped
+        .{ .x = 0.5, .y = 0.5 }, // on antenna "a" -> skipped
     };
     const cfg = config.Config{
         .room = .{ .width = 6.0, .height = 6.0 },
