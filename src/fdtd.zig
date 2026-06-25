@@ -171,23 +171,6 @@ pub fn run(sim: *Sim, timesteps: u32, probes: []const usize, out: [][]f32) void 
 
 // ===== TESTS (written first) =====
 
-fn freeSpaceGrid(allocator: std.mem.Allocator, nx: usize, ny: usize, dx: f64) !Grid {
-    const n = nx * ny;
-    const g = Grid{
-        .allocator = allocator,
-        .nx = nx,
-        .ny = ny,
-        .dx = dx,
-        .eps_r = try allocator.alloc(f64, n),
-        .sigma = try allocator.alloc(f64, n),
-        .pec = try allocator.alloc(bool, n),
-    };
-    @memset(g.eps_r, 1.0);
-    @memset(g.sigma, 0.0);
-    @memset(g.pec, false);
-    return g;
-}
-
 test "courant dt is positive and below dx/c" {
     const dt = courantDt(0.015);
     try std.testing.expect(dt > 0);
@@ -195,7 +178,7 @@ test "courant dt is positive and below dx/c" {
 }
 
 test "source starts near zero and is finite" {
-    var g = try freeSpaceGrid(std.testing.allocator, 5, 5, 0.015);
+    var g = try Grid.initFreeSpace(std.testing.allocator, 5, 5, 0.015);
     defer g.deinit();
     var sim = try init(std.testing.allocator, &g, .{ .center_freq = 915e6, .bandwidth = 200e6 }, 2, 2);
     defer sim.deinit();
@@ -204,7 +187,7 @@ test "source starts near zero and is finite" {
 }
 
 test "field stays finite and bounded over many steps" {
-    var g = try freeSpaceGrid(std.testing.allocator, 60, 60, 0.015);
+    var g = try Grid.initFreeSpace(std.testing.allocator, 60, 60, 0.015);
     defer g.deinit();
     var sim = try init(std.testing.allocator, &g, .{ .center_freq = 915e6, .bandwidth = 200e6 }, 30, 30);
     defer sim.deinit();
@@ -219,7 +202,7 @@ test "field stays finite and bounded over many steps" {
 }
 
 test "PEC cell stays at zero" {
-    var g = try freeSpaceGrid(std.testing.allocator, 20, 20, 0.015);
+    var g = try Grid.initFreeSpace(std.testing.allocator, 20, 20, 0.015);
     defer g.deinit();
     g.pec[g.idx(12, 10)] = true; // a metal cell near the source
     var sim = try init(std.testing.allocator, &g, .{ .center_freq = 915e6, .bandwidth = 200e6 }, 10, 10);

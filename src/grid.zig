@@ -31,6 +31,29 @@ pub const Grid = struct {
         self.allocator.free(self.sigma);
         self.allocator.free(self.pec);
     }
+
+    /// Allocate an all-free-space grid (no config). Caller must call `grid.deinit()`.
+    pub fn initFreeSpace(allocator: std.mem.Allocator, nx: usize, ny: usize, dx: f64) !Grid {
+        const n = nx * ny;
+        const eps_r = try allocator.alloc(f64, n);
+        errdefer allocator.free(eps_r);
+        const sigma = try allocator.alloc(f64, n);
+        errdefer allocator.free(sigma);
+        const pec = try allocator.alloc(bool, n);
+        errdefer allocator.free(pec);
+        @memset(eps_r, 1.0);
+        @memset(sigma, 0.0);
+        @memset(pec, false);
+        return Grid{
+            .allocator = allocator,
+            .nx = nx,
+            .ny = ny,
+            .dx = dx,
+            .eps_r = eps_r,
+            .sigma = sigma,
+            .pec = pec,
+        };
+    }
 };
 
 const METAL_SIGMA_THRESHOLD: f64 = 1e5; // cells with σ above this are treated as PEC
@@ -42,16 +65,22 @@ pub fn build(allocator: std.mem.Allocator, cfg: config.Config) !Grid {
     const ny: usize = @intFromFloat(@round(cfg.room.height / dx));
     const n = nx * ny;
 
+    const eps_r = try allocator.alloc(f64, n);
+    errdefer allocator.free(eps_r);
+    const sigma = try allocator.alloc(f64, n);
+    errdefer allocator.free(sigma);
+    const pec = try allocator.alloc(bool, n);
+    errdefer allocator.free(pec);
+
     var grid = Grid{
         .allocator = allocator,
         .nx = nx,
         .ny = ny,
         .dx = dx,
-        .eps_r = try allocator.alloc(f64, n),
-        .sigma = try allocator.alloc(f64, n),
-        .pec = try allocator.alloc(bool, n),
+        .eps_r = eps_r,
+        .sigma = sigma,
+        .pec = pec,
     };
-    errdefer grid.deinit();
 
     // Default: free space everywhere.
     @memset(grid.eps_r, 1.0);
