@@ -148,6 +148,62 @@ fn lessThanStr(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
 
+fn runOneScene(
+    allocator: std.mem.Allocator,
+    aa: std.mem.Allocator, // arena allocator for manifest strings
+    scenes_dir: []const u8,
+    out_dir: []const u8,
+    fname: []const u8,
+    threads: usize,
+    entries: *std.ArrayList(output.SceneEntry),
+) !void {
+    const stem = fname[0 .. fname.len - ".json".len];
+
+    const cfg_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ scenes_dir, fname });
+    defer allocator.free(cfg_path);
+
+    const cfg_json = try std.fs.cwd().readFileAlloc(allocator, cfg_path, 16 << 20);
+    defer allocator.free(cfg_json);
+
+    var parsed = try config.parse(allocator, cfg_json);
+    defer parsed.deinit();
+
+    try config.validate(parsed.value);
+
+    var grid = try grid_mod.build(allocator, parsed.value);
+    defer grid.deinit();
+
+    try grid_mod.checkAntennaPlacement(grid, parsed.value);
+
+    const base = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_dir, stem });
+    defer allocator.free(base);
+
+    std.debug.print("scene {s}: {d}x{d} grid, {d} threads...\n", .{ stem, grid.nx, grid.ny, threads });
+    const res = try generator.runSweep(allocator, parsed.value, &grid, cfg_json, base, threads);
+    std.debug.print("scene {s}: {d} tags -> {s}.bin / {s}.json\n", .{ stem, res.num_samples, base, base });
+
+    if (parsed.value.snapshots) {
+        const positions = try generator.tagPositions(allocator, parsed.value, grid);
+        defer allocator.free(positions);
+        if (positions.len > 0) {
+            const p = positions[0];
+            const snap_dir = try std.fmt.allocPrint(allocator, "{s}_snapshots", .{base});
+            defer allocator.free(snap_dir);
+            try snapshots.capture(allocator, &grid, .{
+                .center_freq = parsed.value.source.center_freq,
+                .bandwidth = parsed.value.source.bandwidth,
+            }, p.i, p.j, p.x, p.y, parsed.value.timesteps, 50, snap_dir);
+            std.debug.print("scene {s}: snapshots -> {s}/\n", .{ stem, snap_dir });
+        }
+    }
+
+    try entries.append(.{
+        .name = try aa.dupe(u8, stem),
+        .label = try aa.dupe(u8, parsed.value.label orelse stem),
+        .description = try aa.dupe(u8, parsed.value.description orelse ""),
+    });
+}
+
 fn cmdScenes(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var dir_path: ?[]const u8 = null;
     var out_dir: []const u8 = ".";
@@ -221,70 +277,10 @@ fn cmdScenes(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var had_error = false;
 
     for (names.items) |fname| {
-        const stem = fname[0 .. fname.len - ".json".len];
-        const cfg_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ scenes_dir, fname });
-        defer allocator.free(cfg_path);
-
-        const cfg_json = std.fs.cwd().readFileAlloc(allocator, cfg_path, 16 << 20) catch |e| {
-            std.debug.print("scene {s}: read failed: {s}\n", .{ fname, @errorName(e) });
+        runOneScene(allocator, aa, scenes_dir, out_dir, fname, threads, &entries) catch |e| {
+            std.debug.print("scene {s}: failed: {s}\n", .{ fname, @errorName(e) });
             had_error = true;
-            continue;
         };
-        defer allocator.free(cfg_json);
-
-        var parsed = config.parse(allocator, cfg_json) catch |e| {
-            std.debug.print("scene {s}: parse failed: {s}\n", .{ fname, @errorName(e) });
-            had_error = true;
-            continue;
-        };
-        defer parsed.deinit();
-
-        config.validate(parsed.value) catch |e| {
-            std.debug.print("scene {s}: invalid config: {s}\n", .{ fname, @errorName(e) });
-            had_error = true;
-            continue;
-        };
-
-        var grid = grid_mod.build(allocator, parsed.value) catch |e| {
-            std.debug.print("scene {s}: grid build failed: {s}\n", .{ fname, @errorName(e) });
-            had_error = true;
-            continue;
-        };
-        defer grid.deinit();
-
-        grid_mod.checkAntennaPlacement(grid, parsed.value) catch |e| {
-            std.debug.print("scene {s}: invalid config: {s}\n", .{ fname, @errorName(e) });
-            had_error = true;
-            continue;
-        };
-
-        const base = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_dir, stem });
-        defer allocator.free(base);
-
-        std.debug.print("scene {s}: {d}x{d} grid, {d} threads...\n", .{ stem, grid.nx, grid.ny, threads });
-        const res = try generator.runSweep(allocator, parsed.value, &grid, cfg_json, base, threads);
-        std.debug.print("scene {s}: {d} tags -> {s}.bin / {s}.json\n", .{ stem, res.num_samples, base, base });
-
-        if (parsed.value.snapshots) {
-            const positions = try generator.tagPositions(allocator, parsed.value, grid);
-            defer allocator.free(positions);
-            if (positions.len > 0) {
-                const p = positions[0];
-                const snap_dir = try std.fmt.allocPrint(allocator, "{s}_snapshots", .{base});
-                defer allocator.free(snap_dir);
-                try snapshots.capture(allocator, &grid, .{
-                    .center_freq = parsed.value.source.center_freq,
-                    .bandwidth = parsed.value.source.bandwidth,
-                }, p.i, p.j, p.x, p.y, parsed.value.timesteps, 50, snap_dir);
-                std.debug.print("scene {s}: snapshots -> {s}/\n", .{ stem, snap_dir });
-            }
-        }
-
-        try entries.append(.{
-            .name = try aa.dupe(u8, stem),
-            .label = try aa.dupe(u8, parsed.value.label orelse stem),
-            .description = try aa.dupe(u8, parsed.value.description orelse ""),
-        });
     }
 
     if (entries.items.len == 0) {
