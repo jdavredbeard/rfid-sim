@@ -8,6 +8,7 @@ const simdata = @import("simdata.zig");
 const combiner = @import("combiner.zig");
 const snapshots = @import("snapshots.zig");
 const server = @import("server.zig");
+const output = @import("output.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -26,6 +27,8 @@ pub fn main() !void {
         try cmdSimulate(allocator, args[2..]);
     } else if (std.mem.eql(u8, args[1], "combine")) {
         try cmdCombine(allocator, args[2..]);
+    } else if (std.mem.eql(u8, args[1], "scenes")) {
+        try cmdScenes(allocator, args[2..]);
     } else if (std.mem.eql(u8, args[1], "serve")) {
         try cmdServe(allocator, args[2..]);
     } else {
@@ -139,6 +142,162 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
             std.debug.print("snapshots written to {s}/\n", .{snap_dir});
         }
     }
+}
+
+fn lessThanStr(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+fn cmdScenes(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var dir_path: ?[]const u8 = null;
+    var out_dir: []const u8 = ".";
+    var threads: usize = std.Thread.getCpuCount() catch 1;
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--dir")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --dir requires a value\n", .{});
+                return;
+            }
+            dir_path = args[i];
+        } else if (std.mem.eql(u8, a, "--output")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --output requires a value\n", .{});
+                return;
+            }
+            out_dir = args[i];
+        } else if (std.mem.eql(u8, a, "--threads")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --threads requires a value\n", .{});
+                return;
+            }
+            threads = try std.fmt.parseInt(usize, args[i], 10);
+        } else {
+            std.debug.print("unknown flag: {s}\n", .{a});
+            return;
+        }
+    }
+
+    const scenes_dir = dir_path orelse {
+        std.debug.print("error: --dir <scene config dir> is required\n", .{});
+        return;
+    };
+    try std.fs.cwd().makePath(out_dir);
+
+    // Collect *.json scene filenames, sorted for stable manifest order.
+    var names = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (names.items) |n| allocator.free(n);
+        names.deinit();
+    }
+    {
+        var d = try std.fs.cwd().openDir(scenes_dir, .{ .iterate = true });
+        defer d.close();
+        var it = d.iterate();
+        while (try it.next()) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
+            try names.append(try allocator.dupe(u8, entry.name));
+        }
+    }
+    std.mem.sort([]const u8, names.items, {}, lessThanStr);
+
+    if (names.items.len == 0) {
+        std.debug.print("error: no *.json scene configs found in {s}\n", .{scenes_dir});
+        return;
+    }
+
+    // Arena holds manifest strings (stem/label/description) until the manifest is written.
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var entries = std.ArrayList(output.SceneEntry).init(aa);
+    var had_error = false;
+
+    for (names.items) |fname| {
+        const stem = fname[0 .. fname.len - ".json".len];
+        const cfg_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ scenes_dir, fname });
+        defer allocator.free(cfg_path);
+
+        const cfg_json = std.fs.cwd().readFileAlloc(allocator, cfg_path, 16 << 20) catch |e| {
+            std.debug.print("scene {s}: read failed: {s}\n", .{ fname, @errorName(e) });
+            had_error = true;
+            continue;
+        };
+        defer allocator.free(cfg_json);
+
+        var parsed = config.parse(allocator, cfg_json) catch |e| {
+            std.debug.print("scene {s}: parse failed: {s}\n", .{ fname, @errorName(e) });
+            had_error = true;
+            continue;
+        };
+        defer parsed.deinit();
+
+        config.validate(parsed.value) catch |e| {
+            std.debug.print("scene {s}: invalid config: {s}\n", .{ fname, @errorName(e) });
+            had_error = true;
+            continue;
+        };
+
+        var grid = grid_mod.build(allocator, parsed.value) catch |e| {
+            std.debug.print("scene {s}: grid build failed: {s}\n", .{ fname, @errorName(e) });
+            had_error = true;
+            continue;
+        };
+        defer grid.deinit();
+
+        grid_mod.checkAntennaPlacement(grid, parsed.value) catch |e| {
+            std.debug.print("scene {s}: invalid config: {s}\n", .{ fname, @errorName(e) });
+            had_error = true;
+            continue;
+        };
+
+        const base = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_dir, stem });
+        defer allocator.free(base);
+
+        std.debug.print("scene {s}: {d}x{d} grid, {d} threads...\n", .{ stem, grid.nx, grid.ny, threads });
+        const res = try generator.runSweep(allocator, parsed.value, &grid, cfg_json, base, threads);
+        std.debug.print("scene {s}: {d} tags -> {s}.bin / {s}.json\n", .{ stem, res.num_samples, base, base });
+
+        if (parsed.value.snapshots) {
+            const positions = try generator.tagPositions(allocator, parsed.value, grid);
+            defer allocator.free(positions);
+            if (positions.len > 0) {
+                const p = positions[0];
+                const snap_dir = try std.fmt.allocPrint(allocator, "{s}_snapshots", .{base});
+                defer allocator.free(snap_dir);
+                try snapshots.capture(allocator, &grid, .{
+                    .center_freq = parsed.value.source.center_freq,
+                    .bandwidth = parsed.value.source.bandwidth,
+                }, p.i, p.j, p.x, p.y, parsed.value.timesteps, 50, snap_dir);
+                std.debug.print("scene {s}: snapshots -> {s}/\n", .{ stem, snap_dir });
+            }
+        }
+
+        try entries.append(.{
+            .name = try aa.dupe(u8, stem),
+            .label = try aa.dupe(u8, parsed.value.label orelse stem),
+            .description = try aa.dupe(u8, parsed.value.description orelse ""),
+        });
+    }
+
+    if (entries.items.len == 0) {
+        std.debug.print("error: no scenes succeeded; manifest not written\n", .{});
+        return;
+    }
+
+    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/scenes.json", .{out_dir});
+    defer allocator.free(manifest_path);
+    try output.writeScenesManifest(allocator, manifest_path, entries.items, entries.items[0].name);
+    std.debug.print("wrote {s} ({d} scenes)\n", .{ manifest_path, entries.items.len });
+
+    if (had_error) std.debug.print("note: some scenes failed; see messages above\n", .{});
 }
 
 fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
