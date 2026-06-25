@@ -3,6 +3,9 @@ const config = @import("config.zig");
 const grid_mod = @import("grid.zig");
 const generator = @import("generator.zig");
 const validate = @import("validate.zig");
+const combine_config = @import("combine_config.zig");
+const simdata = @import("simdata.zig");
+const combiner = @import("combiner.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -19,6 +22,8 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "simulate")) {
         try cmdSimulate(allocator, args[2..]);
+    } else if (std.mem.eql(u8, args[1], "combine")) {
+        try cmdCombine(allocator, args[2..]);
     } else {
         std.debug.print("unknown command: {s}\n", .{args[1]});
     }
@@ -107,6 +112,82 @@ fn cmdSimulate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const res = try generator.runSweep(allocator, parsed.value, &grid, config_json, output_base, threads);
     const secs = @as(f64, @floatFromInt(timer.read())) / 1e9;
     std.debug.print("done: {d} tag positions in {d:.1}s -> {s}.bin / {s}.json\n", .{ res.num_samples, secs, output_base, output_base });
+}
+
+fn cmdCombine(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var input_base: ?[]const u8 = null;
+    var config_path: ?[]const u8 = null;
+    var output_base: []const u8 = "training-data";
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--input")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --input requires a value\n", .{});
+                return;
+            }
+            input_base = args[i];
+        } else if (std.mem.eql(u8, a, "--config")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --config requires a value\n", .{});
+                return;
+            }
+            config_path = args[i];
+        } else if (std.mem.eql(u8, a, "--output")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("error: --output requires a value\n", .{});
+                return;
+            }
+            output_base = args[i];
+        } else {
+            std.debug.print("unknown flag: {s}\n", .{a});
+            return;
+        }
+    }
+
+    const inb = input_base orelse {
+        std.debug.print("error: --input <sim-output base> is required\n", .{});
+        return;
+    };
+    const cfgp = config_path orelse {
+        std.debug.print("error: --config <combine config> is required\n", .{});
+        return;
+    };
+
+    const cfg_json = try std.fs.cwd().readFileAlloc(allocator, cfgp, 1 << 20);
+    defer allocator.free(cfg_json);
+
+    var parsed = combine_config.parse(allocator, cfg_json) catch |e| {
+        std.debug.print("error: failed to parse combine config: {s}\n", .{@errorName(e)});
+        return;
+    };
+    defer parsed.deinit();
+
+    combine_config.validate(parsed.value) catch |e| {
+        std.debug.print("error: invalid combine config: {s}\n", .{@errorName(e)});
+        return;
+    };
+
+    var sim = simdata.load(allocator, inb) catch |e| {
+        std.debug.print("error: failed to load sim-output '{s}': {s}\n", .{ inb, @errorName(e) });
+        return;
+    };
+    defer sim.deinit();
+
+    if (parsed.value.tags_per_sample.max > sim.numSamples()) {
+        std.debug.print("error: tags_per_sample.max ({d}) exceeds available tag positions ({d})\n", .{ parsed.value.tags_per_sample.max, sim.numSamples() });
+        return;
+    }
+
+    std.debug.print("combining: {d} samples from {d} tags, {d} antennas...\n", .{ parsed.value.num_samples, sim.numSamples(), sim.num_antennas });
+    var timer = try std.time.Timer.start();
+    const res = try combiner.generate(allocator, &sim, parsed.value, output_base);
+    const secs = @as(f64, @floatFromInt(timer.read())) / 1e9;
+    std.debug.print("done: {d} training samples in {d:.2}s -> {s}.bin / {s}.json\n", .{ res.num_samples, secs, output_base, output_base });
 }
 
 test {
