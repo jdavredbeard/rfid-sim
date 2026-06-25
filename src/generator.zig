@@ -47,7 +47,55 @@ pub fn tagPositions(
     return list.toOwnedSlice();
 }
 
-// ===== TEST (written first) =====
+/// Run one FDTD simulation with the source at tag position `pos`, recording Ez
+/// at every antenna cell for `timesteps` steps. Returns an array of `num_antennas`
+/// slices, each of length `timesteps`. Caller frees each slice and the outer slice
+/// (use `freeResponses`).
+pub fn simulateOne(
+    allocator: std.mem.Allocator,
+    grid: *const grid_mod.Grid,
+    cfg: config.Config,
+    pos: TagPos,
+) ![][]f32 {
+    const num_ant = cfg.antennas.len;
+    const ts = cfg.timesteps;
+
+    // Antenna probe cell indices.
+    var probes = try allocator.alloc(usize, num_ant);
+    defer allocator.free(probes);
+    for (cfg.antennas, 0..) |a, ai| {
+        const c = grid.cellOf(a.x, a.y);
+        probes[ai] = grid.idx(c.i, c.j);
+    }
+
+    // Output buffers (one slice per antenna).
+    var out = try allocator.alloc([]f32, num_ant);
+    errdefer allocator.free(out);
+    var allocated: usize = 0;
+    errdefer {
+        var z: usize = 0;
+        while (z < allocated) : (z += 1) allocator.free(out[z]);
+    }
+    while (allocated < num_ant) : (allocated += 1) {
+        out[allocated] = try allocator.alloc(f32, ts);
+    }
+
+    var sim = try fdtd.init(allocator, grid, .{
+        .center_freq = cfg.source.center_freq,
+        .bandwidth = cfg.source.bandwidth,
+    }, pos.i, pos.j);
+    defer sim.deinit();
+
+    fdtd.run(&sim, ts, probes, out);
+    return out;
+}
+
+pub fn freeResponses(allocator: std.mem.Allocator, responses: [][]f32) void {
+    for (responses) |r| allocator.free(r);
+    allocator.free(responses);
+}
+
+// ===== TESTS =====
 
 test "tag positions skip obstacles and antennas" {
     var mats = std.json.ArrayHashMap(config.Material){};
@@ -83,4 +131,37 @@ test "tag positions skip obstacles and antennas" {
         const k = g.idx(p.i, p.j);
         try std.testing.expect(!g.pec[k]);
     }
+}
+
+test "simulateOne returns one impulse per antenna with nonzero energy" {
+    var mats = std.json.ArrayHashMap(config.Material){};
+    defer mats.deinit(std.testing.allocator);
+    var ants = [_]config.Antenna{
+        .{ .x = 0.3, .y = 0.3, .label = "ant1" },
+        .{ .x = 0.7, .y = 0.7, .label = "ant2" },
+    };
+    const cfg = config.Config{
+        .room = .{ .width = 1.0, .height = 1.0 },
+        .grid_resolution = 0.02,
+        .materials = mats,
+        .walls = &.{},
+        .obstacles = &.{},
+        .antennas = &ants,
+        .source = .{ .type = "gaussian_pulse", .center_freq = 915e6, .bandwidth = 200e6 },
+        .tag_grid_spacing = 0.25,
+        .timesteps = 800,
+    };
+    var g = try grid_mod.build(std.testing.allocator, cfg);
+    defer g.deinit();
+
+    const pos = TagPos{ .x = 0.5, .y = 0.5, .i = g.cellOf(0.5, 0.5).i, .j = g.cellOf(0.5, 0.5).j };
+    const responses = try simulateOne(std.testing.allocator, &g, cfg, pos);
+    defer freeResponses(std.testing.allocator, responses);
+
+    try std.testing.expectEqual(@as(usize, 2), responses.len);
+    try std.testing.expectEqual(@as(usize, 800), responses[0].len);
+    // The pulse must reach each antenna: peak amplitude clearly above zero.
+    var peak: f32 = 0;
+    for (responses[0]) |v| peak = @max(peak, @abs(v));
+    try std.testing.expect(peak > 1e-4);
 }
