@@ -120,9 +120,119 @@ function updateSelectionLabel() {
     .join(", ");
 }
 
+// ---- Coverage Heatmap view ----
+function populateAntennaSelect() {
+  const sel = document.getElementById("coverage-antenna");
+  if (sel.options.length) return;
+  state.meta.antennas.forEach((label, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx);
+    opt.textContent = label;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener("change", renderCoverage);
+}
+
+function valueToColor(t) {
+  // t in [0,1] -> blue(low) -> green -> yellow -> red(high)
+  const r = Math.max(0, Math.min(255, Math.round(255 * (t * 1.5 - 0.2))));
+  const g = Math.max(0, Math.min(255, Math.round(255 * (1 - Math.abs(t - 0.5) * 2))));
+  const b = Math.max(0, Math.min(255, Math.round(255 * (1 - t * 1.5))));
+  return `rgb(${r},${g},${b})`;
+}
+
+async function renderCoverage() {
+  populateAntennaSelect();
+  await ensureBin();
+  const canvas = document.getElementById("coverage-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const cfg = state.meta.config;
+  const T = makeTransform(canvas, cfg.room.width, cfg.room.height);
+  const a = parseInt(document.getElementById("coverage-antenna").value || "0", 10);
+
+  const peaks = new Float64Array(state.meta.samples.length);
+  let maxPeak = 0;
+  for (let i = 0; i < state.meta.samples.length; i++) {
+    const imp = impulseFor(i, a);
+    let p = 0;
+    for (let k = 0; k < imp.length; k++) { const v = Math.abs(imp[k]); if (v > p) p = v; }
+    peaks[i] = p;
+    if (p > maxPeak) maxPeak = p;
+  }
+
+  const cell = Math.max(6, (cfg.tag_grid_spacing || 0.25) * T.s);
+  for (let i = 0; i < state.meta.samples.length; i++) {
+    const s = state.meta.samples[i];
+    const t = maxPeak > 0 ? peaks[i] / maxPeak : 0;
+    ctx.fillStyle = valueToColor(t);
+    ctx.fillRect(T.x(s.tag_x) - cell / 2, T.y(s.tag_y) - cell / 2, cell, cell);
+  }
+  for (const ant of cfg.antennas || []) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(T.x(ant.x), T.y(ant.y), 5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  document.getElementById("coverage-legend").textContent =
+    `peak |Ez| for ${state.meta.antennas[a]} — blue=low, red=high (max ${maxPeak.toExponential(2)})`;
+}
+
+// ---- Impulse Response view ----
+const ANT_COLORS = ["#1f6feb", "#3fb950", "#f0c000", "#f85149", "#a371f7", "#39c5cf"];
+
+async function renderImpulse() {
+  await ensureBin();
+  const canvas = document.getElementById("impulse-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const info = document.getElementById("impulse-info");
+  if (state.selected.length === 0) {
+    info.textContent = "Select tag(s) in the Room Layout view, then return here.";
+    return;
+  }
+  const N = state.meta.impulse_length;
+  const M = state.meta.antennas.length;
+
+  let amp = 1e-12;
+  for (const s of state.selected) for (let a = 0; a < M; a++) {
+    const imp = impulseFor(s, a);
+    for (let k = 0; k < N; k++) { const v = Math.abs(imp[k]); if (v > amp) amp = v; }
+  }
+
+  const pad = 30;
+  const w = canvas.width - 2 * pad;
+  const h = canvas.height - 2 * pad;
+  const midY = pad + h / 2;
+  ctx.strokeStyle = "#30363d";
+  ctx.beginPath(); ctx.moveTo(pad, midY); ctx.lineTo(pad + w, midY); ctx.stroke();
+
+  state.selected.forEach((s, si) => {
+    for (let a = 0; a < M; a++) {
+      ctx.strokeStyle = ANT_COLORS[a % ANT_COLORS.length];
+      ctx.setLineDash(si === 0 ? [] : [4, 3]);
+      ctx.beginPath();
+      const imp = impulseFor(s, a);
+      for (let k = 0; k < N; k++) {
+        const x = pad + (k / (N - 1)) * w;
+        const y = midY - (imp[k] / amp) * (h / 2) * 0.95;
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  });
+  ctx.setLineDash([]);
+  info.innerHTML = "Antennas: " +
+    state.meta.antennas.map((l, a) => `<span style="color:${ANT_COLORS[a % ANT_COLORS.length]}">${l}</span>`).join(", ") +
+    `<br/>Tags: ${state.selected.length} (solid = first; dashed = others). Overlay shows superposition geometry.`;
+}
+
 // ---- view dispatch (extended in later tasks) ----
 const VIEWS = {
   room: renderRoom,
+  // wave: renderWave,  // added in Task 6
+  coverage: renderCoverage,
+  impulse: renderImpulse,
 };
 
 function showView(name) {
